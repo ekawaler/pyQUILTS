@@ -14,7 +14,8 @@ Emily Kawaler
 
 import argparse
 import os
-import datetime
+import shutil
+from datetime import datetime
 from subprocess import call
 
 # ahhhh look at these hideous global variables
@@ -29,9 +30,9 @@ def parse_input_arguments():
 	# Do I want to have some sort of root directory so they don't have to enter full paths? Probably not - 
 	# full paths are a pain but they're more flexible.
 	parser = argparse.ArgumentParser(description="QUILTS") # What even is this description for, anyway? Maybe I'll remove it eventually
-	parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/quilts_py/test",
+	parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts",
 		help="full path to output folder") # Make not-optional at some point
-	parser.add_argument('--proteome', type=str, default="ensembl_human_37.70", help="folder containing reference proteome") # Decide whether to keep defaults later. If not, make sure to check them in this function.
+	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/ensembl_human_37.70", help="full path to folder containing reference proteome") # Decide whether to keep defaults later. If not, make sure to check them in this function.
 	parser.add_argument('--somatic', type=str, help="VCF file of somatic variants")
 	parser.add_argument('--germline', type=str, help="VCF file of germline variants")
 	parser.add_argument('--junction', type=str, help="BED file of splice junctions [currently unsupported]")
@@ -49,7 +50,7 @@ def parse_input_arguments():
 	
 	return args
 
-def set_up_output_dir(output_dir):
+def set_up_output_dir(output_dir, ref_proteome):
 	''' Sets up the results folder (creates it, sets up a log file and status file).
 		Because this will probably confuse people (me) later, "output directory" refers
 		to the directory the user specifies in which the "results folder" will reside. The
@@ -73,7 +74,7 @@ def set_up_output_dir(output_dir):
 	
 	# Makes the results folder. Calls it results_(date and time). Looks ugly, but I'm cool with that.
 	# Lets us avoid the problem of dealing with multiple results folders in the same output directory.
-	today = datetime.datetime.today()
+	today = datetime.today()
 	day_time_string = str(today.year)+str(today.month)+str(today.day)+'.'+str(today.hour)+str(today.minute)+str(today.second)
 	results_folder = output_dir+'/results_'+day_time_string
 	os.makedirs(results_folder)
@@ -84,6 +85,19 @@ def set_up_output_dir(output_dir):
 	statusfile = results_folder+'/status.txt'
 	write_to_log("Logfile created: "+str(today))
 	write_to_status("Status file created: "+str(today))
+	
+	# Creates some folders within the results folder
+	# Currently just copying what's in the Perl version.
+	# Likely to change as I start building out other functionality.
+	os.makedirs(results_folder+"/log")
+	os.makedirs(results_folder+"/fasta")
+	os.makedirs(results_folder+"/fasta/parts")
+	
+	# Moves reference proteome to the working area.
+	try:
+		shutil.copy(ref_proteome+"/proteome.fasta",results_folder+"/fasta/parts/"+ref_proteome.split("/")[-1]+".fasta")
+	except IOError:
+		raise SystemExit("ERROR: Reference proteome not found at "+ref_proteome+"/proteome.fasta.\nAborting program.")
 
 def write_to_log(message):
 	'''Writes a message to the output log. It's only one line, but I made it its own function
@@ -107,5 +121,8 @@ if __name__ == "__main__":
 	
 	# Set up log/status files
 	output_dir = args.output_dir
-	set_up_output_dir(output_dir)
+	set_up_output_dir(output_dir, args.proteome)
 
+	write_to_status("Started")
+	write_to_log("Version Python.0")
+	write_to_log("Reference DB used: "+args.proteome.split("/")[-1])
