@@ -6,6 +6,9 @@ Remaking QUILTS in Python.
 It's in its early stages, so half the lines are just me asking myself questions
 that I will forget to answer in the future.
 
+Also, trying to be super meticulous about checking input for correctness/existence.
+Hold me to this in the future when I start to get lazy.
+
 Emily Kawaler
 '''
 
@@ -14,11 +17,14 @@ import os
 import datetime
 from subprocess import call
 
+# ahhhh look at these hideous global variables
 global logfile
 global statusfile
 global results_folder
 
 def parse_input_arguments():
+	''' Sets up an argument parser and checks a couple of the inputs for correctness.'''
+	
 	# Set up the argument parser
 	# Do I want to have some sort of root directory so they don't have to enter full paths? Probably not - 
 	# full paths are a pain but they're more flexible.
@@ -44,6 +50,11 @@ def parse_input_arguments():
 	return args
 
 def set_up_output_dir(output_dir):
+	''' Sets up the results folder (creates it, sets up a log file and status file).
+		Because this will probably confuse people (me) later, "output directory" refers
+		to the directory the user specifies in which the "results folder" will reside. The
+		results folder contains the actual results.'''
+		
 	# I hate this global variable stuff but is there another way to do it
 	# without having to pass the logfile/statusfile to all the functions so they can be used?
 	global logfile
@@ -75,6 +86,8 @@ def set_up_output_dir(output_dir):
 	write_to_status("Status file created: "+str(today))
 
 def write_to_log(message):
+	'''Writes a message to the output log. It's only one line, but I made it its own function
+	because it will be much easier to understand in the body of the code.'''
 	# Error message can only be one line long, since adding '\n' messes up the call
 	# Calling this for each line you want to error-write is a workaround, since it automatically
 	# adds one.
@@ -83,6 +96,8 @@ def write_to_log(message):
 	call("echo "+message+" >> "+logfile, shell=True)
 
 def write_to_status(message):
+	'''Writes a message to the status log. It's only one line, but I made it its own function
+	because it will be much easier to understand in the body of the code.'''
 	# Same comment as in write_to_log
 	call("echo "+message+" >> "+statusfile, shell=True)
 
