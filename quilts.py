@@ -1,9 +1,22 @@
+'''
+quilts.py
+
+Remaking QUILTS in Python.
+
+It's in its early stages, so half the lines are just me asking myself questions
+that I will forget to answer in the future.
+
+Emily Kawaler
+'''
+
 import argparse
 import os
+import datetime
 from subprocess import call
 
 global logfile
 global statusfile
+global results_folder
 
 def parse_input_arguments():
 	# Set up the argument parser
@@ -35,6 +48,7 @@ def set_up_output_dir(output_dir):
 	# without having to pass the logfile/statusfile to all the functions so they can be used?
 	global logfile
 	global statusfile
+	global results_folder
 	
 	# Will the directory they give us be where we put the results, or where we put a folder
 	# containing the results?
@@ -46,14 +60,19 @@ def set_up_output_dir(output_dir):
 	if not os.path.isdir(output_dir):
 		raise SystemExit("ERROR: Output directory does not exist.\nAborting program.")
 	
-	if not os.path.isdir(output_dir+'/quilts_results'):
-		os.makedirs(output_dir+'/quilts_results')
-	else:
-		# There must be a less stupid way to do this.
-		raise SystemExit("ERROR: Output folder already exists.\nAborting program.")
+	# Makes the results folder. Calls it results_(date and time). Looks ugly, but I'm cool with that.
+	# Lets us avoid the problem of dealing with multiple results folders in the same output directory.
+	today = datetime.datetime.today()
+	day_time_string = str(today.year)+str(today.month)+str(today.day)+'.'+str(today.hour)+str(today.minute)+str(today.second)
+	results_folder = output_dir+'/results_'+day_time_string
+	os.makedirs(results_folder)
 	
-	logfile = output_dir+'/log.txt'	
-	statusfile = output_dir+'/status.txt'
+	# Gives us addresses for the logfile and statusfile,
+	# and writes the starting date and time to them.
+	logfile = results_folder+'/log.txt'	
+	statusfile = results_folder+'/status.txt'
+	write_to_log("Logfile created: "+str(today))
+	write_to_status("Status file created: "+str(today))
 
 def write_to_log(message):
 	# Error message can only be one line long, since adding '\n' messes up the call
