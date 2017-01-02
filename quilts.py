@@ -44,12 +44,13 @@ def parse_input_arguments():
 	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/ensembl_human_37.70", help="full path to folder containing reference proteome")
 	# The only one I found that has both somatic and germline
 	parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim11/rna/vcf", help="VCF file of somatic variants")
-	parser.add_argument('--germline', type=str, help="VCF file of germline variants")
+	parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim11/rna/vcf", help="VCF file of germline variants")
 	parser.add_argument('--junction', type=str, help="BED file of splice junctions [currently unsupported]")
 	parser.add_argument('--fusion', type=str, help="Fusion genes [currently unsupported]")
 	parser.add_argument('--threshA', type=int, default=2)
 	parser.add_argument('--threshAN', type=int, default=3)
 	parser.add_argument('--threshN', type=int, default=3)
+	parser.add_argument('--variant_quality_threshold', type=float, default=1.0, help="Quality threshold for variants")
 	
 	# Pull out the arguments
 	args = parser.parse_args()
@@ -111,6 +112,18 @@ def set_up_output_dir(output_dir, ref_proteome):
 
 ### These functions are used while getting variants.
 
+def check_for_vcf_file(vcf_dir, type):
+	''' Hunt down the VCF file. Raise a warning if not found. Helper function for set_up_vcf_single and set_up_vcf_both.'''
+	# Right now, only accepts files with <type> (somatic or germline) in the name. can change that if necessary
+	files = os.listdir(vcf_dir)
+	vcf_filename = None
+	for f in files:
+		if f.endswith('.vcf') and f.find(type) != -1:
+			vcf_filename = f
+	if not vcf_filename:
+		warnings.warn("Warning: Couldn't find variant file in %s!" % vcf_dir)
+	return vcf_filename
+		
 def set_up_vcf_dir(vcf_dir):
 	'''Make the directory we'll put our VCF files in.'''
 	if not os.path.isdir(vcf_dir):
@@ -125,25 +138,21 @@ def set_up_vcf_dir(vcf_dir):
 		#raise_warning("VCF directory "+vcf_dir+"/merged already exists!")
 		warnings.warn("VCF directory "+vcf_dir+"/merged already exists!")
 
-def set_up_vcf_single(quality_threshold, vcf_dir):
+def set_up_vcf_single(quality_threshold, vcf_dir, type):
 	'''If we have either somatic or germline but not both, all we do here is the quality threshold.'''
 	
-	# Hunt down the VCF file. Return with a warning if not found.
+	# Hunt down the VCF file. Abort if not found.
+	# (It'll be a warning later when we have fusions/junctions, but for now we need variants.)
 	# Right now, only accepts files with "somatic" or "germline" in the name. can change that if necessary
-	files = os.listdir(vcf_dir)
-	vcf_filename = None
-	for f in files:
-		if f.endswith('.vcf') and (f.find('somatic') != -1 or f.find('germline') != -1):
-			vcf_filename = f
+	vcf_filename = check_for_vcf_file(vcf_dir, type)
 	if not vcf_filename:
-		warnings.warn("Warning: Couldn't find variant file!")
-		return
+		raise SystemExit("ERROR: Couldn't find variant file at %s!\nAborting program." % vcf_dir)	
 	
 	# Cool, we have a valid file, let's open our log, output and input files.
-	f = open(vcf_dir+'/'+vcf_filename,'r')
 	vcf_log_location = vcf_dir+'/merged_pytest/merged.log'
 	vcf_log = open(vcf_log_location,'w')
 	write_to_log(vcf_dir+'/'+vcf_filename, vcf_log_location)
+	f = open(vcf_dir+'/'+vcf_filename,'r')
 	w = open(vcf_dir+'/merged_pytest/merged.vcf','w')
 	
 	# I read one line at a time instead of going with f.readlines() because
@@ -191,8 +200,38 @@ def set_up_vcf_single(quality_threshold, vcf_dir):
 	vcf_log.close()
 	
 def set_up_vcf_both(quality_threshold, somatic_dir, germline_dir):
-	# Quality filter, then check if somatic variant exists
-	pass
+	# Zeroth: Make sure both files are openable.
+	# First: Do somatic like we did in set_up_vcf_single, except we now save
+	# the chromosomes/positions.
+	# Then: Do germline like we did in set_up_vcf_single, except we now don't save
+	# the variants that were in the somatic file.
+	
+	# Hunt down the VCF files. If one isn't found, raise a warning, then go to
+	# set_up_vcf_single with the one that is found. If neither are found, return with an error.
+	# (It'll be a warning later, when we have junctions/fusions, but for now we need a variant file.)
+	somatic_filename = check_for_vcf_file(somatic_dir, "somatic")
+	germline_filename = check_for_vcf_file(germline_dir, "germline")
+	if not somatic_filename and not germline_filename:
+		raise SystemExit("ERROR: Couldn't find either variant file!\nAborting program.")
+	elif not somatic_filename:
+		warnings.warn("Could not find the somatic variant file. Continuing with germline only.")
+		set_up_vcf_single(quality_threshold, germline_dir, "germline")
+		return
+	elif not germline_filename:
+		warnings.warn("Could not find the germline variant file. Continuing with somatic only.")
+		set_up_vcf_single(quality_threshold, somatic_dir, "somatic")
+		return
+	
+	# Cool, we have two valid files, let's open our log, somatic and output files.
+	vcf_log_location = somatic_dir+'/merged_pytest/merged.log'
+	vcf_log = open(vcf_log_location,'w')
+	write_to_log(somatic_dir+'/'+somatic_filename, vcf_log_location)	
+	f = open(somatic_dir+'/'+somatic_filename,'r')
+	w = open(somatic_dir+'/merged_pytest/merged.vcf','w')
+		
+	f.close()
+	w.close()
+	vcf_log.close()
 
 ### These functions are used everywhere.
 
@@ -243,10 +282,10 @@ if __name__ == "__main__":
 		set_up_vcf_dir(args.somatic)
 
 	if args.somatic and args.germline:
-		set_up_vcf_both(1.0, args.somatic)
+		set_up_vcf_both(args.variant_quality_threshold, args.somatic, args.germline)
 	else:
 		if args.somatic:
-			set_up_vcf_single(1.0, args.somatic)
+			set_up_vcf_single(args.variant_quality_threshold, args.somatic, "somatic")
 		else:
-			# We've already killed the program if neither exists, so germline must exist.
+			set_up_vcf_single(args.variant_quality_threshold, args.germline, "germline")
 			pass
