@@ -343,20 +343,20 @@ def set_up_vcf_both(quality_threshold, somatic_dir, germline_dir):
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
-	'''Writes a message to the output log. It's only one line, but I made it its own function
-	because it will be much easier to understand in the body of the code.'''
-	# Error message can only be one line long, since adding '\n' messes up the call
-	# Calling this for each line you want to error-write is a workaround, since it automatically
-	# adds one.
+	'''Writes a message to the output log.'''
 	# I think this is more efficient than opening and writing to the end of the file with the 
 	# Python I/O tools, but if not it would probably be more convenient to use those.
-	call("echo "+message+" >> "+log_file, shell=True)
+	# Fixed it so we can write messages with returns in them!
+	msg = message.split('\n')
+	for m in msg:
+		call("echo "+m+" >> "+log_file, shell=True)
 
 def write_to_status(message):
-	'''Writes a message to the status log. It's only one line, but I made it its own function
-	because it will be much easier to understand in the body of the code.'''
+	'''Writes a message to the status log.'''
 	# Same comment as in write_to_log
-	call("echo "+message+" >> "+statusfile, shell=True)
+	msg = message.split('\n')
+	for m in msg:
+		call("echo "+m+" >> "+statusfile, shell=True)
 
 def raise_warning(warn_message):
 	'''The default warning is ugly! I'm making a better one. Okay I'm not, this is a waste of time right now.'''
@@ -375,9 +375,12 @@ if __name__ == "__main__":
 	write_to_log("Version Python.0", logfile)
 	write_to_log("Reference DB used: "+args.proteome.split("/")[-1], logfile)
 	
+	
 	# Time to merge and quality-threshold the variant files!
 	# This set of "if" statements is kind of clunky right now, may fix eventually.
 	# Seems like the original allows for multiple files. Why? Is this necessary?
+	# Also, maybe I should have waited until the proteome part to merge the two...
+	# Hmmmm. Well, for now I'll just do this get_variants.pl script, I think.
 	if not args.somatic:
 		set_up_vcf_dir(args.germline)
 	else:
@@ -391,3 +394,4 @@ if __name__ == "__main__":
 		else:
 			set_up_vcf_single(args.variant_quality_threshold, args.germline, "germline")
 			pass
+	
