@@ -110,7 +110,7 @@ def set_up_output_dir(output_dir, ref_proteome):
 	except IOError:
 		raise SystemExit("ERROR: Reference proteome not found at "+ref_proteome+"/proteome.fasta.\nAborting program.")
 
-### These functions are used while getting variants.
+### These functions are used while merging/quality-checking variants.
 
 def check_for_vcf_file(vcf_dir, type):
 	''' Hunt down the VCF file. Raise a warning if not found. Helper function for set_up_vcf_single and set_up_vcf_both.'''
@@ -139,7 +139,7 @@ def set_up_vcf_dir(vcf_dir):
 		warnings.warn("VCF directory "+vcf_dir+"/merged already exists!")
 
 def set_up_vcf_single(quality_threshold, vcf_dir, type):
-	'''If we have either somatic or germline but not both, all we do here is the quality threshold.'''
+	'''If we have either somatic or germline but not both, all we do here is the quality threshold and subtraction of one from the position.'''
 	
 	# Hunt down the VCF file. Abort if not found.
 	# (It'll be a warning later when we have fusions/junctions, but for now we need variants.)
@@ -178,8 +178,13 @@ def set_up_vcf_single(quality_threshold, vcf_dir, type):
 		# If we passed those checks, let's say it's good...
 		total_variants += 1
 		# Not sure why we subtract one from pos, but it happened in the original.
-		chr, pos, id, old, new, qual = spline[0], int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
-		
+		try:
+			chr, pos, id, old, new, qual = spline[0], int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
+		except ValueError:
+			write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
+			line = f.readline()
+			continue	
+					
 		# Quality check!
 		if qual < quality_threshold:
 			qual_removed += 1
@@ -200,11 +205,13 @@ def set_up_vcf_single(quality_threshold, vcf_dir, type):
 	vcf_log.close()
 	
 def set_up_vcf_both(quality_threshold, somatic_dir, germline_dir):
-	# Zeroth: Make sure both files are openable.
-	# First: Do somatic like we did in set_up_vcf_single, except we now save
-	# the chromosomes/positions.
-	# Then: Do germline like we did in set_up_vcf_single, except we now don't save
-	# the variants that were in the somatic file.
+	'''Sets up the variant file when we have both somatic and germline. As in single, includes a quality check. Unlike in single, makes sure to exclude any germline variants that already exist in the somatic file.'''
+
+	# We don't care that the VCF file isn't in any kind of order, right?
+	# My tester doesn't find any duplicates between somatic and germline.
+	# Not sure if it's because it's checking wrong, or if my test files just don't have any duplicates.
+	# (Okay, I checked. There just aren't any duplicates. Gotta find a new tester.)
+	# Also: I only save somatic variants to be checked if they pass the quality check. This cool? I think it's cool.
 	
 	# Hunt down the VCF files. If one isn't found, raise a warning, then go to
 	# set_up_vcf_single with the one that is found. If neither are found, return with an error.
@@ -225,10 +232,112 @@ def set_up_vcf_both(quality_threshold, somatic_dir, germline_dir):
 	# Cool, we have two valid files, let's open our log, somatic and output files.
 	vcf_log_location = somatic_dir+'/merged_pytest/merged.log'
 	vcf_log = open(vcf_log_location,'w')
-	write_to_log(somatic_dir+'/'+somatic_filename, vcf_log_location)	
+	write_to_log("Somatic variant file: "+somatic_dir+'/'+somatic_filename, vcf_log_location)	
 	f = open(somatic_dir+'/'+somatic_filename,'r')
 	w = open(somatic_dir+'/merged_pytest/merged.vcf','w')
+	
+	# I copy/pasted code and I'm not proud of myself. Gonna do it again, too.
+	# If I end up having to make extensive edits to this code, I'll put it in a function.
+	# But I think there are just enough small changes that I need to do it this way :(
+	line = f.readline()
+	somatic_variants = set([]) # Should be stored as a hash, so quicker lookups than in arrays?
+	qual_removed_som = 0
+	total_variants_som = 0
+	kept_variants_som = 0
+	while line:
+		spline = line.split('\t')
+		if len(spline) != 6:
+			# Bummer, we don't have six tab-separated fields, this isn't a valid VCF line
+			write_to_log("Error parsing: "+line, vcf_log_location)
+			line = f.readline()
+			continue
+		if line[0] == '#':
+			# It's a header line. Write it as-is to the file.
+			w.write(line)
+			line = f.readline()
+			continue
 		
+		# If we passed those checks, let's say it's good...
+		total_variants_som += 1
+		# Not sure why we subtract one from pos, but it happened in the original.
+		try:
+			chr, pos, id, old, new, qual = spline[0], int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
+		except ValueError:
+			write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
+			line = f.readline()
+			continue		
+
+		# Quality check!
+		if qual < quality_threshold:
+			qual_removed_som += 1
+			line = f.readline()
+			continue
+		
+		# Passed the quality check? Cool, write it out to the file, save it to the list and continue.
+		kept_variants_som += 1
+		somatic_variants.add("%s#%s" % (chr, pos))
+		w.write(line)
+		line = f.readline()
+	
+	write_to_log("", vcf_log_location)
+	f.close()
+	
+	# Now do the same thing with germline variants, but in addition to the quality check,
+	# remove any that overlap with somatic variants.
+	f = open(germline_dir+'/'+germline_filename,'r')
+	write_to_log("Germline variant file: "+germline_dir+'/'+germline_filename, vcf_log_location)
+	
+	line = f.readline()
+	qual_removed_germ = 0
+	duplicate_removed_germ = 0
+	total_variants_germ = 0
+	kept_variants_germ = 0
+	
+	while line:
+		spline = line.split('\t')
+		if len(spline) != 6:
+			# Bummer, we don't have six tab-separated fields, this isn't a valid VCF line
+			write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
+			line = f.readline()
+			continue
+		if line[0] == '#':
+			# It's a header line. Skip - should have used the one from the somatic variants..
+			line = f.readline()
+			continue
+		
+		# If we passed those checks, let's say it's good...
+		total_variants_germ += 1
+		# Not sure why we subtract one from pos, but it happened in the original.
+		try:
+			chr, pos, id, old, new, qual = spline[0], int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
+		except ValueError:
+			write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
+			line = f.readline()
+			continue
+		
+		# Does it already exist in the somatic file? If so, dump it!
+		if chr+"#"+str(pos) in somatic_variants:
+			duplicate_removed_germ += 1
+			line = f.readline()
+			continue
+		
+		# Quality check!
+		if qual < quality_threshold:
+			qual_removed_germ += 1
+			line = f.readline()
+			continue
+
+		# Passed all the checks? Cool, write it out to the file and continue.
+		kept_variants_germ += 1
+		w.write(line)
+		line = f.readline()
+					
+	# Write a summary to the log and close all files. We're done here.
+	write_to_log("",vcf_log_location)
+	write_to_log("Somatic stats: %d total variants, %d failed quality check at threshold %f, %d variants kept in final version" % (total_variants_som, qual_removed_som, quality_threshold, kept_variants_som), vcf_log_location)
+	write_to_log("Germline stats: %d total variants, %d were duplicates of somatic variants, %d failed quality check at threshold %f, %d variants kept in final version" % (total_variants_germ, duplicate_removed_germ, qual_removed_germ, quality_threshold, kept_variants_germ), vcf_log_location)
+	write_to_log("Total stats: %d total variants, %d germline duplicate variants removed, %d failed quality check at threshold %f, %d variants kept in final version" % ((total_variants_germ+total_variants_som), duplicate_removed_germ, (qual_removed_germ+qual_removed_som), quality_threshold, (kept_variants_som+kept_variants_germ)), vcf_log_location)
+
 	f.close()
 	w.close()
 	vcf_log.close()
@@ -268,13 +377,8 @@ if __name__ == "__main__":
 	write_to_log("Version Python.0", logfile)
 	write_to_log("Reference DB used: "+args.proteome.split("/")[-1], logfile)
 	
-	# Time to get some variants!
-	# merge_vcf_orig.pl twice: with somatic first, then germline as argument
-	# We are still cool with removing germline variants that also appear in somatic.
-	# So...merge_vcf.pl seems like it's really only used to remove repeats. We don't want to do that.
-	# If there's only one file, we'll skip this step and just copy the VCF to the working directory.	
-	# If there are two, we need to merge them.
-	# Kind of clunky right now, will fix when i have a better idea what I'm doing.
+	# Time to merge and quality-threshold the variant files!
+	# This set of "if" statements is kind of clunky right now, may fix eventually.
 	# Seems like the original allows for multiple files. Why? Is this necessary?
 	if not args.somatic:
 		set_up_vcf_dir(args.germline)
