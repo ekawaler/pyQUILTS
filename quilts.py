@@ -43,8 +43,8 @@ def parse_input_arguments():
 		help="full path to output folder")
 	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/ensembl_human_37.70", help="full path to folder containing reference proteome")
 	# The only one I found that has both somatic and germline
-	parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim11/rna/vcf", help="VCF file of somatic variants")
-	parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim11/rna/vcf", help="VCF file of germline variants")
+	parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim37/rna/vcf", help="VCF file of somatic variants")
+	parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim37/rna/vcf", help="VCF file of germline variants")
 	parser.add_argument('--junction', type=str, help="BED file of splice junctions [currently unsupported]")
 	parser.add_argument('--fusion', type=str, help="Fusion genes [currently unsupported]")
 	parser.add_argument('--threshA', type=int, default=2)
@@ -208,10 +208,7 @@ def set_up_vcf_both(quality_threshold, somatic_dir, germline_dir):
 	'''Sets up the variant file when we have both somatic and germline. As in single, includes a quality check. Unlike in single, makes sure to exclude any germline variants that already exist in the somatic file.'''
 
 	# We don't care that the VCF file isn't in any kind of order, right?
-	# My tester doesn't find any duplicates between somatic and germline.
-	# Not sure if it's because it's checking wrong, or if my test files just don't have any duplicates.
-	# (Okay, I checked. There just aren't any duplicates. Gotta find a new tester.)
-	# Also: I only save somatic variants to be checked if they pass the quality check. This cool? I think it's cool.
+	# Also: I only save somatic variants to be checked against germline if they pass the quality check. This cool? I think it's cool.
 	
 	# Hunt down the VCF files. If one isn't found, raise a warning, then go to
 	# set_up_vcf_single with the one that is found. If neither are found, return with an error.
@@ -318,6 +315,7 @@ def set_up_vcf_both(quality_threshold, somatic_dir, germline_dir):
 		# Does it already exist in the somatic file? If so, dump it!
 		if chr+"#"+str(pos) in somatic_variants:
 			duplicate_removed_germ += 1
+			write_to_log("Duplicate found: "+line.rstrip(), vcf_log_location)
 			line = f.readline()
 			continue
 		
