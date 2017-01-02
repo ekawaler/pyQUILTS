@@ -9,6 +9,11 @@ that I will forget to answer in the future.
 Also, trying to be super meticulous about checking input for correctness/existence.
 Hold me to this in the future when I start to get lazy.
 
+A possible Important Thing for the future: write something to status/log whenever SystemExit happens?
+
+A definite thing for the future: making a script that will call this one, since these filepaths
+are real unwieldy. Should be able to move various "does this file actually exist" checks to that script.
+
 Emily Kawaler
 '''
 
@@ -17,11 +22,14 @@ import os
 import shutil
 from datetime import datetime
 from subprocess import call
+import warnings
 
 # ahhhh look at these hideous global variables
 global logfile
 global statusfile
 global results_folder
+
+### These functions are used in the setup phase.
 
 def parse_input_arguments():
 	''' Sets up an argument parser and checks a couple of the inputs for correctness.'''
@@ -29,11 +37,13 @@ def parse_input_arguments():
 	# Set up the argument parser
 	# Do I want to have some sort of root directory so they don't have to enter full paths? Probably not - 
 	# full paths are a pain but they're more flexible.
+	# Also, at some point, make some of these arguments not optional.
 	parser = argparse.ArgumentParser(description="QUILTS") # What even is this description for, anyway? Maybe I'll remove it eventually
 	parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts",
-		help="full path to output folder") # Make not-optional at some point
-	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/ensembl_human_37.70", help="full path to folder containing reference proteome") # Decide whether to keep defaults later. If not, make sure to check them in this function.
-	parser.add_argument('--somatic', type=str, help="VCF file of somatic variants")
+		help="full path to output folder")
+	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/ensembl_human_37.70", help="full path to folder containing reference proteome")
+	# The only one I found that has both somatic and germline
+	parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim11/rna/vcf", help="VCF file of somatic variants")
 	parser.add_argument('--germline', type=str, help="VCF file of germline variants")
 	parser.add_argument('--junction', type=str, help="BED file of splice junctions [currently unsupported]")
 	parser.add_argument('--fusion', type=str, help="Fusion genes [currently unsupported]")
@@ -83,7 +93,7 @@ def set_up_output_dir(output_dir, ref_proteome):
 	# and writes the starting date and time to them.
 	logfile = results_folder+'/log.txt'	
 	statusfile = results_folder+'/status.txt'
-	write_to_log("Logfile created: "+str(today))
+	write_to_log("Logfile created: "+str(today), logfile)
 	write_to_status("Status file created: "+str(today))
 	
 	# Creates some folders within the results folder
@@ -99,7 +109,94 @@ def set_up_output_dir(output_dir, ref_proteome):
 	except IOError:
 		raise SystemExit("ERROR: Reference proteome not found at "+ref_proteome+"/proteome.fasta.\nAborting program.")
 
-def write_to_log(message):
+### These functions are used while getting variants.
+
+def set_up_vcf_dir(vcf_dir):
+	'''Make the directory we'll put our VCF files in.'''
+	if not os.path.isdir(vcf_dir):
+		# For now, this is the only thing we care about. If there aren't any VCF files, there's no program.
+		# So we abort. Later, we can just raise a non-kill exception and write a complaint to the log.
+		raise SystemExit("VCF directory not found at "+vcf_dir+".\nAborting program.")
+	try:
+		# Change to merged later, but for now...
+		os.makedirs(vcf_dir+"/merged_pytest")
+	except OSError:
+		#raise SystemExit("VCF directory "+vcf_dir+"/merged already exists!\nAborting program.")
+		#raise_warning("VCF directory "+vcf_dir+"/merged already exists!")
+		warnings.warn("VCF directory "+vcf_dir+"/merged already exists!")
+
+def set_up_vcf_single(quality_threshold, vcf_dir):
+	'''If we have either somatic or germline but not both, all we do here is the quality threshold.'''
+	
+	# Hunt down the VCF file. Return with a warning if not found.
+	# Right now, only accepts files with "somatic" or "germline" in the name. can change that if necessary
+	files = os.listdir(vcf_dir)
+	vcf_filename = None
+	for f in files:
+		if f.endswith('.vcf') and (f.find('somatic') != -1 or f.find('germline') != -1):
+			vcf_filename = f
+	if not vcf_filename:
+		warnings.warn("Warning: Couldn't find variant file!")
+		return
+	
+	# Cool, we have a valid file, let's open our log, output and input files.
+	f = open(vcf_dir+'/'+vcf_filename,'r')
+	vcf_log_location = vcf_dir+'/merged_pytest/merged.log'
+	vcf_log = open(vcf_log_location,'w')
+	write_to_log(vcf_dir+'/'+vcf_filename, vcf_log_location)
+	w = open(vcf_dir+'/merged_pytest/merged.vcf','w')
+	
+	# I read one line at a time instead of going with f.readlines() because
+	# if the file is long, it's bad to hold all of the lines in memory.
+	# In case you were wondering, which you almost certainly weren't.
+	line = f.readline()
+	qual_removed = 0
+	total_variants = 0
+	kept_variants = 0
+	while line:
+		spline = line.split('\t')
+		if len(spline) != 6:
+			# Bummer, we don't have six tab-separated fields, this isn't a valid VCF line
+			write_to_log("Error parsing: "+line, vcf_log_location)
+			line = f.readline()
+			continue
+		if line[0] == '#':
+			# It's a header line. Write it as-is to the file.
+			w.write(line)
+			line = f.readline()
+			continue
+		
+		# If we passed those checks, let's say it's good...
+		total_variants += 1
+		# Not sure why we subtract one from pos, but it happened in the original.
+		chr, pos, id, old, new, qual = spline[0], int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
+		
+		# Quality check!
+		if qual < quality_threshold:
+			qual_removed += 1
+			line = f.readline()
+			continue
+		
+		# Passed the quality check? Cool, write it out to the file and continue.
+		kept_variants += 1
+		w.write(line)
+		line = f.readline()
+	
+	# Write a summary to the log and close all files. We're done here.
+	write_to_log("",vcf_log_location)
+	write_to_log("%d total variants, %d failed quality check at threshold %f, %d variants kept in final version" % (total_variants, qual_removed, quality_threshold, kept_variants), vcf_log_location)
+	
+	f.close()
+	w.close()
+	vcf_log.close()
+	
+def set_up_vcf_both(quality_threshold, somatic_dir, germline_dir):
+	# Quality filter, then check if somatic variant exists
+	pass
+
+### These functions are used everywhere.
+
+def write_to_log(message, log_file):
 	'''Writes a message to the output log. It's only one line, but I made it its own function
 	because it will be much easier to understand in the body of the code.'''
 	# Error message can only be one line long, since adding '\n' messes up the call
@@ -107,7 +204,7 @@ def write_to_log(message):
 	# adds one.
 	# I think this is more efficient than opening and writing to the end of the file with the 
 	# Python I/O tools, but if not it would probably be more convenient to use those.
-	call("echo "+message+" >> "+logfile, shell=True)
+	call("echo "+message+" >> "+log_file, shell=True)
 
 def write_to_status(message):
 	'''Writes a message to the status log. It's only one line, but I made it its own function
@@ -115,6 +212,12 @@ def write_to_status(message):
 	# Same comment as in write_to_log
 	call("echo "+message+" >> "+statusfile, shell=True)
 
+def raise_warning(warn_message):
+	'''The default warning is ugly! I'm making a better one. Okay I'm not, this is a waste of time right now.'''
+	my_warning = warnings.warn(warn_message)
+	print my_warning
+	
+# Main function!
 if __name__ == "__main__":
 	# Parse input.
 	args = parse_input_arguments()
@@ -122,7 +225,28 @@ if __name__ == "__main__":
 	# Set up log/status files
 	output_dir = args.output_dir
 	set_up_output_dir(output_dir, args.proteome)
-
 	write_to_status("Started")
-	write_to_log("Version Python.0")
-	write_to_log("Reference DB used: "+args.proteome.split("/")[-1])
+	write_to_log("Version Python.0", logfile)
+	write_to_log("Reference DB used: "+args.proteome.split("/")[-1], logfile)
+	
+	# Time to get some variants!
+	# merge_vcf_orig.pl twice: with somatic first, then germline as argument
+	# We are still cool with removing germline variants that also appear in somatic.
+	# So...merge_vcf.pl seems like it's really only used to remove repeats. We don't want to do that.
+	# If there's only one file, we'll skip this step and just copy the VCF to the working directory.	
+	# If there are two, we need to merge them.
+	# Kind of clunky right now, will fix when i have a better idea what I'm doing.
+	# Seems like the original allows for multiple files. Why? Is this necessary?
+	if not args.somatic:
+		set_up_vcf_dir(args.germline)
+	else:
+		set_up_vcf_dir(args.somatic)
+
+	if args.somatic and args.germline:
+		set_up_vcf_both(1.0, args.somatic)
+	else:
+		if args.somatic:
+			set_up_vcf_single(1.0, args.somatic)
+		else:
+			# We've already killed the program if neither exists, so germline must exist.
+			pass
