@@ -473,6 +473,57 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 	vcf_log.close()
 	return None
 
+### This function removes any duplicate germline/somatic variants from the somatic file.
+
+def remove_somatic_duplicates(germ_dir, som_dir):
+	'''Removes duplicate germline/somatic variants from the somatic file.'''
+	# Shouldn't have to check and make sure the files are there - that should have happened earlier
+	# Open the germ file, save all of the chr/pos/old/new in a hash table for easy lookup
+	# Then open the somatic file, go through each line, if one matches just don't write it back out
+	# Afterwards, overwrite the old somatic merged.vcf with the new one
+	
+	global logfile
+	
+	# Open the germline file, save all of the information in a hash table for easy lookup, close it
+	f = open(germ_dir+'/merged_pytest/merged.vcf','r')
+	germ_variants = set([])
+	line = f.readline()
+	while line:
+		if line[0] == '#':
+			# found a header
+			line = f.readline()
+			continue
+		spline = line.split('\t')
+		variant = "%s#%s#%s#%s" % (spline[0], spline[1], spline[3], spline[4]) # a.k.a. chr, pos, old, new
+		germ_variants.add(variant)
+		line = f.readline()
+	f.close()
+	
+	w = open(som_dir+'/merged_pytest/temp.vcf','w')
+	f = open(som_dir+'/merged_pytest/merged.vcf','r')
+	duplicates_found = 0
+	kept_variants = 0
+	line = f.readline()
+	while line:
+		if line[0] == '#':
+			# found a header
+			w.write(line)
+			line = f.readline()
+			continue
+		spline = line.split('\t')
+		variant = "%s#%s#%s#%s" % (spline[0], spline[1], spline[3], spline[4]) # a.k.a. chr, pos, old, new
+		if variant in germ_variants:
+			duplicates_found += 1
+		else:
+			kept_variants += 1
+			w.write(line)
+		line = f.readline()
+		
+	w.close()
+	f.close()
+	write_to_log("Found %d duplicates between somatic and germline variant files. Removed from somatic file. %d somatic variants remain." % (duplicates_found, kept_variants),logfile)
+	shutil.move(som_dir+'/merged_pytest/temp.vcf', som_dir+'/merged_pytest/merged.vcf')
+
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
@@ -516,6 +567,11 @@ if __name__ == "__main__":
 	if som_flag and germ_flag:
 		# We can keep going with only one variant file, but if we find neither, we have to quit.
 		raise SystemExit("ERROR: Couldn't find any variant files!\nAborting program.")
+		
+	# Now let's remove everything in the somatic file that is duplicated in the germline file
+	# since if it shows up in both, it's a germline variant.
+	if args.somatic and args.germline and not (som_flag or germ_flag):
+		remove_somatic_duplicates(args.germline, args.somatic)
 
 '''
 	if args.somatic and args.germline:
