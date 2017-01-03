@@ -367,7 +367,7 @@ def pull_vcf_files(vcf_dir):
 	return vcf_files	
 
 def merge_and_qual_filter(vcf_dir, quality_threshold):
-	'''Returns None if successful, or 1 if unable to find variant files.'''
+	'''Returns None if successful, or 1 if unable to find variant files. If duplicates appear, pick the one with the highest quality score.'''
 	
 	# Set up the output directory, if possible. If not found, return with a warning.
 	output_dir_flag = set_up_vcf_output_dir(vcf_dir)
@@ -386,11 +386,13 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 	vcf_log = open(vcf_log_location,'w')
 	w = open(vcf_dir+'/merged_pytest/merged.vcf','w')	
 
-	# Set up some counting stats
+	# Set up some tracking stats etc.
 	qual_removed_all = 0
 	total_variants_all = 0
 	kept_variants_all = 0
+	duplicates_all = 0
 	header_written = False
+	existing_variants = {}
 
 	for vf in vcf_files:
 		f = open(vcf_dir+'/'+vf, 'r')
@@ -403,6 +405,8 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 		qual_removed = 0
 		total_variants = 0
 		kept_variants = 0
+		duplicates_removed = 0 # Duplicates in this file that were lower-quality than older duplicates
+		old_duplicates_removed = 0 # Duplicates in this file that were higher-quality than older duplicates
 		while line:
 			spline = line.split('\t')
 			if len(spline) < 6:
@@ -421,7 +425,7 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 			total_variants += 1
 			# Not sure why we subtract one from pos, but it happened in the original.
 			try:
-				chr, pos, id, old, new, qual = spline[0], int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
+				chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
 			except ValueError:
 				write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
 				line = f.readline()
@@ -432,10 +436,21 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 				qual_removed += 1
 				line = f.readline()
 				continue
-		
-			# Passed the quality check? Cool, write the first six fields out to the file and continue.
+
+			# Is there a higher-quality version of this variant already found?
+			line_map_key = "%s#%d#%s#%s" % (chr, pos, old, new)
+			if line_map_key in existing_variants:
+				if existing_variants[line_map_key][5] > qual:
+					duplicates_removed += 1
+					line = f.readline()
+					continue
+				else:
+					old_duplicates_removed += 1
+
+			# Passed the other checks? Cool, store the first six fields in our map and continue.
+			# Overwrite the duplicate if it exists.
 			kept_variants += 1
-			w.write('\t'.join(spline[0:6])+'\n')
+			existing_variants[line_map_key] = [chr, pos, id, old, new, qual]
 			line = f.readline()
 
 		# Add everything up and write a status line to the log
@@ -443,12 +458,17 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 		qual_removed_all += qual_removed
 		total_variants_all += total_variants
 		kept_variants_all += kept_variants
-		write_to_log("\nFrom variant file %s: %d total variants, %d failed quality check at threshold %f, %d variants kept in final version" % (vf, total_variants, qual_removed, quality_threshold, kept_variants), vcf_log_location)
+		duplicates_all += (duplicates_removed+old_duplicates_removed)
+		write_to_log("\nFrom variant file %s: %d total variants, %d failed quality check at threshold %f, %d duplicates found \(%d overwritten\), %d variants kept in final version" % (vf, total_variants, qual_removed, quality_threshold, (duplicates_removed+old_duplicates_removed), old_duplicates_removed, kept_variants), vcf_log_location)
 		write_to_log("------------------------", vcf_log_location)
 		f.close()
 		
+	# Write all variants to merged.vcf
+	for key in sorted(existing_variants.keys()):
+		w.write('chr'+'\t'.join(str(i) for i in existing_variants[key])+'\n')
+
 	# Write final status line to the log and close all files, we're done.
-	write_to_log("\nTotal for all variant files: %d total variants, %d failed quality check at threshold %f, %d variants kept in final version" % (total_variants_all, qual_removed_all, quality_threshold, kept_variants_all), vcf_log_location)
+	write_to_log("\nTotal for all variant files: %d total variants, %d failed quality check at threshold %f, %d duplicates removed, %d variants kept in final version" % (total_variants_all, qual_removed_all, quality_threshold, duplicates_all, len(existing_variants.keys())), vcf_log_location)
 	w.close()
 	vcf_log.close()
 	return None
