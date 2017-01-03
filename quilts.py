@@ -14,6 +14,8 @@ A possible Important Thing for the future: write something to status/log wheneve
 A definite thing for the future: making a script that will call this one, since these filepaths
 are real unwieldy. Should be able to move various "does this file actually exist" checks to that script.
 
+Another definite thing: change all merged_pytest to merged
+
 Emily Kawaler
 '''
 
@@ -41,16 +43,16 @@ def parse_input_arguments():
 	parser = argparse.ArgumentParser(description="QUILTS") # What even is this description for, anyway? Maybe I'll remove it eventually
 	parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts",
 		help="full path to output folder")
-	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/ensembl_human_37.70", help="full path to folder containing reference proteome")
+	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20130727", help="full path to folder containing reference proteome")
 	# The only one I found that has both somatic and germline
-	parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim37/rna/vcf", help="VCF file of somatic variants")
-	parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast-xenografts/whim37/rna/vcf", help="VCF file of germline variants")
+	parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna/vcf/TCGA-20130502-S", help="VCF file of somatic variants")
+	parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna-germline/vcf/GATK26-G-Nature", help="VCF file of germline variants")
 	parser.add_argument('--junction', type=str, help="BED file of splice junctions [currently unsupported]")
 	parser.add_argument('--fusion', type=str, help="Fusion genes [currently unsupported]")
 	parser.add_argument('--threshA', type=int, default=2)
 	parser.add_argument('--threshAN', type=int, default=3)
 	parser.add_argument('--threshN', type=int, default=3)
-	parser.add_argument('--variant_quality_threshold', type=float, default=1.0, help="Quality threshold for variants")
+	parser.add_argument('--variant_quality_threshold', type=float, default=15.0, help="Quality threshold for variants")
 	
 	# Pull out the arguments
 	args = parser.parse_args()
@@ -110,7 +112,7 @@ def set_up_output_dir(output_dir, ref_proteome):
 	except IOError:
 		raise SystemExit("ERROR: Reference proteome not found at "+ref_proteome+"/proteome.fasta.\nAborting program.")
 
-### These functions are used while merging/quality-checking variants.
+### These functions are all dicked. Will be deleted gradually once I've scavenged them for anything useful.
 
 def check_for_vcf_file(vcf_dir, type):
 	''' Hunt down the VCF file. Raise a warning if not found. Helper function for set_up_vcf_single and set_up_vcf_both.'''
@@ -340,6 +342,117 @@ def set_up_vcf_both(quality_threshold, somatic_dir, germline_dir):
 	w.close()
 	vcf_log.close()
 
+### These functions are for merging and quality checking the variant files.
+
+def set_up_vcf_output_dir(vcf_dir):
+	'''Make the directory we'll put our merged VCF files in. Returns with an error if directory doesn't exist.'''
+	if not os.path.isdir(vcf_dir):
+		# No VCF files are going to be found. Gotta leave the function.
+		return 1
+	try:
+		# Change to merged later, but for now...
+		os.makedirs(vcf_dir+"/merged_pytest")
+	except OSError:
+		# Right now I'm just going to overwrite things in there.
+		warnings.warn("VCF directory "+vcf_dir+"/merged already exists!\nOverwriting contents...")
+	return None
+
+def pull_vcf_files(vcf_dir):
+	'''Finds all .vcf files in the directory.'''
+	files = os.listdir(vcf_dir)
+	vcf_files = []
+	for f in files:
+		if f.endswith('.vcf'):
+			vcf_files.append(f)
+	return vcf_files	
+
+def merge_and_qual_filter(vcf_dir, quality_threshold):
+	'''Returns None if successful, or 1 if unable to find variant files.'''
+	
+	# Set up the output directory, if possible. If not found, return with a warning.
+	output_dir_flag = set_up_vcf_output_dir(vcf_dir)
+	if output_dir_flag:
+		warnings.warn("VCF directory not found at %s" % vcf_dir)
+		return 1
+
+	# Pull the list of .vcf files in the directory. If none found, return with a warning.
+	vcf_files = pull_vcf_files(vcf_dir)
+	if len(vcf_files) == 0:
+		warnings.warn("Unable to find any .vcf files in %s" % vcf_dir)
+		return 1
+
+	# Cool, we have a valid file, let's open our log and output files.
+	vcf_log_location = vcf_dir+'/merged_pytest/merged.log'
+	vcf_log = open(vcf_log_location,'w')
+	w = open(vcf_dir+'/merged_pytest/merged.vcf','w')	
+
+	# Set up some counting stats
+	qual_removed_all = 0
+	total_variants_all = 0
+	kept_variants_all = 0
+	header_written = False
+
+	for vf in vcf_files:
+		f = open(vcf_dir+'/'+vf, 'r')
+		write_to_log(vcf_dir+'/'+vf, vcf_log_location)
+		
+		# I read one line at a time instead of going with f.readlines() because
+		# if the file is long, it's bad to hold all of the lines in memory.
+		# In case you were wondering, which you almost certainly weren't.
+		line = f.readline()
+		qual_removed = 0
+		total_variants = 0
+		kept_variants = 0
+		while line:
+			spline = line.split('\t')
+			if len(spline) < 6:
+				# Bummer, we don't have six tab-separated fields, this isn't a valid VCF line
+				write_to_log("Error parsing: "+line, vcf_log_location)
+				line = f.readline()
+				continue
+			if line[0] == '#':
+				# It's a header line. Write it as-is to the file if it's the first file.
+				if not header_written:
+					w.write('\t'.join(spline[0:6])+'\n')
+				line = f.readline()
+				continue
+
+			# If we passed those checks, let's say it's good...
+			total_variants += 1
+			# Not sure why we subtract one from pos, but it happened in the original.
+			try:
+				chr, pos, id, old, new, qual = spline[0], int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
+			except ValueError:
+				write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
+				line = f.readline()
+				continue	
+					
+			# Quality check!
+			if qual < quality_threshold:
+				qual_removed += 1
+				line = f.readline()
+				continue
+		
+			# Passed the quality check? Cool, write the first six fields out to the file and continue.
+			kept_variants += 1
+			w.write('\t'.join(spline[0:6])+'\n')
+			line = f.readline()
+
+		# Add everything up and write a status line to the log
+		header_written = True # Don't want to write a header unless it's the first file
+		qual_removed_all += qual_removed
+		total_variants_all += total_variants
+		kept_variants_all += kept_variants
+		write_to_log("\nFrom variant file %s: %d total variants, %d failed quality check at threshold %f, %d variants kept in final version" % (vf, total_variants, qual_removed, quality_threshold, kept_variants), vcf_log_location)
+		write_to_log("------------------------", vcf_log_location)
+		f.close()
+		
+	# Write final status line to the log and close all files, we're done.
+	write_to_log("\nTotal for all variant files: %d total variants, %d failed quality check at threshold %f, %d variants kept in final version" % (total_variants_all, qual_removed_all, quality_threshold, kept_variants_all), vcf_log_location)
+	w.close()
+	vcf_log.close()
+	return None
+
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
@@ -365,7 +478,7 @@ def raise_warning(warn_message):
 	
 # Main function!
 if __name__ == "__main__":
-	# Parse input.
+	# Parse input, make sure we have at least one variant file.
 	args = parse_input_arguments()
 	
 	# Set up log/status files
@@ -375,17 +488,16 @@ if __name__ == "__main__":
 	write_to_log("Version Python.0", logfile)
 	write_to_log("Reference DB used: "+args.proteome.split("/")[-1], logfile)
 	
-	
 	# Time to merge and quality-threshold the variant files!
-	# This set of "if" statements is kind of clunky right now, may fix eventually.
-	# Seems like the original allows for multiple files. Why? Is this necessary?
-	# Also, maybe I should have waited until the proteome part to merge the two...
-	# Hmmmm. Well, for now I'll just do this get_variants.pl script, I think.
-	if not args.somatic:
-		set_up_vcf_dir(args.germline)
-	else:
-		set_up_vcf_dir(args.somatic)
+	if args.somatic:
+		som_flag = merge_and_qual_filter(args.somatic, args.variant_quality_threshold)
+	if args.germline:
+		germ_flag = merge_and_qual_filter(args.germline, args.variant_quality_threshold)
+	if som_flag and germ_flag:
+		# We can keep going with only one variant file, but if we find neither, we have to quit.
+		raise SystemExit("ERROR: Couldn't find any variant files!\nAborting program.")
 
+'''
 	if args.somatic and args.germline:
 		set_up_vcf_both(args.variant_quality_threshold, args.somatic, args.germline)
 	else:
@@ -393,5 +505,5 @@ if __name__ == "__main__":
 			set_up_vcf_single(args.variant_quality_threshold, args.somatic, "somatic")
 		else:
 			set_up_vcf_single(args.variant_quality_threshold, args.germline, "germline")
-			pass
+'''
 	
