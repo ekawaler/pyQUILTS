@@ -23,7 +23,7 @@ import argparse
 import os
 import shutil
 from datetime import datetime
-from subprocess import call
+from subprocess import call, check_call, CalledProcessError
 import warnings
 
 # ahhhh look at these hideous global variables
@@ -110,7 +110,13 @@ def set_up_output_dir(output_dir, ref_proteome):
 	try:
 		shutil.copy(ref_proteome+"/proteome.fasta",results_folder+"/fasta/parts/"+ref_proteome.split("/")[-1]+".fasta")
 	except IOError:
-		raise SystemExit("ERROR: Reference proteome not found at "+ref_proteome+"/proteome.fasta.\nAborting program.")
+		raise SystemExit("ERROR: Reference proteome .fasta file not found at "+ref_proteome+"/proteome.fasta.\nAborting program.")	
+	try:
+		shutil.copy(ref_proteome+"/proteome.bed",results_folder+"/log/")
+	except IOError:
+		raise SystemExit("ERROR: Reference proteome .bed file not found at "+ref_proteome+"/proteome.bed.\nAborting program.")
+		
+	return results_folder
 
 ### These functions are for merging and quality checking the variant files.
 
@@ -321,10 +327,11 @@ def raise_warning(warn_message):
 if __name__ == "__main__":
 	# Parse input, make sure we have at least one variant file.
 	args = parse_input_arguments()
-	
+	script_dir = os.path.dirname(os.path.realpath(__file__)) # can this really be the best way to do this!?
+
 	# Set up log/status files
 	output_dir = args.output_dir
-	set_up_output_dir(output_dir, args.proteome)
+	results_folder = set_up_output_dir(output_dir, args.proteome)
 	write_to_status("Started")
 	write_to_log("Version Python.0", logfile)
 	write_to_log("Reference DB used: "+args.proteome.split("/")[-1], logfile)
@@ -343,13 +350,8 @@ if __name__ == "__main__":
 	if args.somatic and args.germline and not (som_flag or germ_flag):
 		remove_somatic_duplicates(args.germline, args.somatic)
 
-'''
-	if args.somatic and args.germline:
-		set_up_vcf_both(args.variant_quality_threshold, args.somatic, args.germline)
-	else:
-		if args.somatic:
-			set_up_vcf_single(args.variant_quality_threshold, args.somatic, "somatic")
-		else:
-			set_up_vcf_single(args.variant_quality_threshold, args.germline, "germline")
-'''
-	
+	# Do the read_chr_bed thing. Not quite sure what that is, exactly.
+	try:
+		check_call("%s/read_chr_bed %s/log/proteome.bed" % (script_dir, results_folder), shell=True)
+	except CalledProcessError:
+		raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file.\nAborting program.")
