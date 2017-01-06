@@ -25,6 +25,7 @@ import shutil
 from datetime import datetime
 from subprocess import call, check_call, CalledProcessError
 import warnings
+from exonSearchTree import ExonSearchTree
 
 # ahhhh look at these hideous global variables
 global logfile
@@ -89,7 +90,7 @@ def set_up_output_dir(output_dir, ref_proteome):
 	# Makes the results folder. Calls it results_(date and time). Looks ugly, but I'm cool with that.
 	# Lets us avoid the problem of dealing with multiple results folders in the same output directory.
 	today = datetime.today()
-	day_time_string = str(today.year)+str(today.month)+str(today.day)+'.'+str(today.hour)+str(today.minute)+str(today.second)
+	day_time_string = str(today.year)+str(today.month).zfill(2)+str(today.day).zfill(2)+'.'+str(today.hour).zfill(2)+str(today.minute).zfill(2)+str(today.second).zfill(2)
 	results_folder = output_dir+'/results_'+day_time_string
 	os.makedirs(results_folder)
 	
@@ -301,6 +302,49 @@ def remove_somatic_duplicates(germ_dir, som_dir):
 	write_to_log("Found %d duplicates between somatic and germline variant files. Removed from somatic file. %d somatic variants remain." % (duplicates_found, kept_variants),logfile)
 	shutil.move(som_dir+'/merged_pytest/temp.vcf', som_dir+'/merged_pytest/merged.vcf')
 
+### These functions are used to create bed files of only variants that exist in exons.
+
+def get_variants(vcf_file, proteome_file, type):
+	# perl $script_root/get_variants.pl "$result_dir/log/proteome.bed" $somatic/merged/merged.vcf S
+	w = open(proteome_file+".var", 'w')
+	f = open(proteome_file, 'r')
+	
+	# Basically goes through proteome.bed and finds all positions in exons
+	# Then goes through the .vcf file and checks if they're in any exons
+	# I think he saves literally every number. I'm going to just have it check if it's between the start and end, should be more efficient
+	# Output line: NP_XX (name) \t type-old(position in genome)new:(quality),(repeat)\t type-old(position in exome)new:(quality),(repeat) Looks like instead of quality it might have taken the wrong field at some point? Sometimes it looks like instead of quality we just get a dot, even when it shouldn't be missing. I'll leave quality in for now and see if we use it later. Output all genes, even if they have no variants.
+	
+	start_map = {}
+	lengths_map = {}
+	offsets_map = {}
+	pos_map = {}
+	est = ExonSearchTree()
+	line = f.readline() # Going to assume no headers for now
+	
+	# I kind of want to make a class for variants but that would probably be overly aggressive. So I won't.
+	# But let the record show that I wanted to.
+	while line:
+		spline = line.rstrip().split('\t')
+		try:
+			chr, start, name, lengths, offsets = spline[0].lstrip('chr'), int(spline[1]), spline[3], spline[10], spline[11]
+		except ValueError:
+			# Maybe write this to a log somewhere?
+			warnings.warn("Failed to parse %s" % line)
+			line = f.readline()
+			continue
+		start_map[name] = start
+		lengths_map[name] = lengths
+		offsets_map[name] = offsets
+		splengths = lengths.split(',')
+		spoffsets = offsets.split(',')
+		for i in range(len(spoffsets)):
+			# The original saved a map with every position that ever appears in an exon
+			# and the names of the genes it goes with. This feels slow and inefficient, so instead
+			# I made some wacked-out tree thing for storage and search. See if you like it!
+			est.add_exon(chr, int(spoffsets[i])+start, int(spoffsets[i])+start+int(splengths[i]), name)
+			
+		line = f.readline()
+
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
@@ -351,8 +395,20 @@ if __name__ == "__main__":
 	if args.somatic and args.germline and not (som_flag or germ_flag):
 		remove_somatic_duplicates(args.germline, args.somatic)
 
-	# Do the read_chr_bed thing. Not quite sure what that is, exactly.
+	'''# Call read_chr_bed.c, which takes the reference genome and proteome.bed file as input and produces
+	# a fasta file of exomes.
+	# Possible but unlikely future work: rewrite the C file (still in C though) so it's more efficient?
+	# I dunno, it seems fine for now.
 	try:
 		check_call("%s/read_chr_bed %s/log/proteome.bed %s" % (script_dir, results_folder, args.genome), shell=True)
 	except CalledProcessError:
-		raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file.\nAborting program.")
+		raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file.\nAborting program.")'''
+	# Commented the above out for speed - it's slow, so for current testing purposes I'm just copying it from elsewhere
+	shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/proteome.bed.dna', results_folder+"/log/")
+	
+	# Next, create a proteome.bed file containing only variants...probably.
+	# perl $script_root/get_variants.pl "$result_dir/log/proteome.bed" $somatic/merged/merged.vcf S
+	if args.somatic and not som_flag:
+		get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "S")
+	#if args.germline and not germ_flag:
+		#get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "G")
