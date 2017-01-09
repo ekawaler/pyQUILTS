@@ -23,6 +23,7 @@ class ExonSearchTree:
 	
 	def print_tree(self):
 		'''Used this instead of __str__ for formatting reasons, I guess.''' 
+		# Will currently print an exon several times if it spans many blocks. I don't care much about this function so am ignoring it for now but someday I'll fix it.
 		for node in self.chr_nodes:
 			self.chr_nodes[node].print_node()
 	
@@ -121,8 +122,10 @@ if __name__=="__main__":
 	est.add_exon(1, 99999900, 100000500, 1499, "NP_7")
 	est.add_exon('M', 999990, 1000500, 280, "NP_6")
 	est.add_exon('Q', 3939, 8858, 0)
+	est.add_exon('Q', 3939, 8858, 130, "NP_8")
 	est.print_tree()
 	print est.find_exon('M', 999995)
 	print est.find_exon('1', 100000001)
 	print est.find_exon('1', 99999901)
 	print est.find_exon('2', 949034)
+	print est.find_exon('Q', 4500)

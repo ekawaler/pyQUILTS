@@ -305,21 +305,20 @@ def remove_somatic_duplicates(germ_dir, som_dir):
 ### These functions are used to create bed files of only variants that exist in exons.
 
 def get_variants(vcf_file, proteome_file, type):
-	# perl $script_root/get_variants.pl "$result_dir/log/proteome.bed" $somatic/merged/merged.vcf S
 	f = open(proteome_file, 'r')
 	
 	# Basically goes through proteome.bed and finds all positions in exons
 	# Then goes through the .vcf file and checks if they're in any exons
-	# I think he saves literally every number. I'm going to just have it check if it's between the start and end, should be more efficient
 	# Output line: NP_XX (name) \t type-old(position in genome)new:(quality),(repeat)\t type-old(position in exome)new:(quality),(repeat) Looks like instead of quality it might have taken the wrong field at some point? Sometimes it looks like instead of quality we just get a dot, even when it shouldn't be missing. I'll leave quality in for now and see if we use it later. Output all genes, even if they have no variants.
 	
 	# QUESTION: In the original, it appears that in proteome.bed.var the pos-- doesn't happen? Why?
-	# Also, somatic hasn't been filtered yet at this step. I think it should be okay that that's changed here - 
+	# Also, somatic hasn't been filtered yet at this step in the original. I think it should be okay that that's changed here - 
 	# the earlier you filter it, the faster the other steps are.
+	# Okay. Compared to the original, it picks up 20 extras. These are all variants that appear at the last base of an exon. I think we actually want to keep them? but I'm not totally sure
 	
 	est = ExonSearchTree()
 	line = f.readline() # Going to assume no headers for now
-
+	all_names = set([])
 	while line:
 		spline = line.rstrip().split('\t')
 		try:
@@ -330,6 +329,8 @@ def get_variants(vcf_file, proteome_file, type):
 			line = f.readline()
 			continue
 
+		all_names.add(name)
+		
 		splengths = lengths.split(',')
 		spoffsets = offsets.split(',')
 		total_exon_length = 0
@@ -337,7 +338,7 @@ def get_variants(vcf_file, proteome_file, type):
 			# The original saved a map with every position that ever appears in an exon
 			# and the names of the genes it goes with. This feels slow and inefficient, so instead
 			# I made some wacked-out tree thing for storage and search. See if you like it!
-			# Whoa okay i think that's actually way faster.
+			# Whoa okay, tested it, it's much faster.
 			est.add_exon(chr, int(spoffsets[i])+start, int(spoffsets[i])+start+int(splengths[i]), total_exon_length, name)	
 			total_exon_length += int(splengths[i])		
 		line = f.readline()
@@ -350,13 +351,13 @@ def get_variants(vcf_file, proteome_file, type):
 	while line:
 		spline = line.rstrip().split('\t')
 		try:
-			chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
+			# Maybe I shouldn't subtract one from pos here - did it when I made the vcf file in the first place
+			chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1]), spline[2], spline[3], spline[4], float(spline[5])
 		except ValueError:
 			# Maybe write this to a log somewhere?
 			warnings.warn("Failed to parse %s" % line)
 			line = f.readline()
 			continue
-		# Deal with inability to find the exon! (Some variants are introns)
 		exon = est.find_exon(chr,pos)
 		if exon != []:
 			# Save pos in chr and pos in gene
@@ -373,11 +374,16 @@ def get_variants(vcf_file, proteome_file, type):
 	f.close()
 
 	# Write variants out to file.
+	# Need to let it write genes with no variants, also.
 	w = open(proteome_file+"."+type+".var", 'w')	
-	for key in all_genes:
+	for key in all_names:
 		in_chr = []
 		in_gene = []
-		for var in all_genes[key]:
+		try:
+			vars = all_genes[key]
+		except KeyError:
+			vars = []
+		for var in vars:
 			in_chr.append(var[0])
 			in_gene.append(var[1])
 		w.write("%s\t%s\t%s\n" % (key, ','.join(in_chr), ','.join(in_gene)))
@@ -418,12 +424,66 @@ def get_variants_orig(vcf_file, proteome_file, type):
 		for i in range(len(splengths)):
 			total_exons += 1
 			for j in range(start+int(spoffsets[i]), start+int(spoffsets[i])+int(splengths[i])):
-				# I'll rewrite it the old way sometime to test which is faster.
 				identifier = "%s#%d" % (chr, j)
-				pos_map[identifier] = pos_map.get(identifier, "") + name		
+				pos_map[identifier] = pos_map.get(identifier, "") + name + ","		
 		line = f.readline()
 	#print total_exons
 	f.close()
+
+	f = open(vcf_file, 'r')
+	line = f.readline() # Still assuming no headers
+	pos_in_gene = {}
+	pos_in_chr = {}
+	while line:
+		spline = line.rstrip().split('\t')
+		try:
+			chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1]), spline[2], spline[3], spline[4], float(spline[5])
+		except ValueError:
+			# Maybe write this to a log somewhere?
+			warnings.warn("Failed to parse %s" % line)
+			line = f.readline()
+			continue
+
+		identifier = "%s#%d" % (chr, pos)
+		try:
+			names = pos_map[identifier].split(',')[:-1]
+		except KeyError:
+			line = f.readline()
+			continue
+		for name in names:
+			try:
+				pos_in_chr[name].append("%s-%s%d%s:%f," % (type, old, pos, new, qual))
+			except KeyError:
+				pos_in_chr[name] = ["%s-%s%d%s:%f," % (type, old, pos, new, qual)]
+			lengths = lengths_map[name].split(',')
+			offsets = offsets_map[name].split(',')
+			start = start_map[name]
+			indiv_pos_in_gene = 0
+			for i in range(len(offsets)):
+				if int(offsets[i])+start <= pos <= int(offsets[i])+start+int(lengths[i]):
+					indiv_pos_in_gene += pos-int(offsets[i])-start
+					break
+				else:
+					indiv_pos_in_gene += int(lengths[i])
+			try:
+				pos_in_gene[name].append("%s-%s%d%s:%f," % (type, old, indiv_pos_in_gene, new, qual))
+			except KeyError:
+				pos_in_gene[name] = ["%s-%s%d%s:%f," % (type, old, indiv_pos_in_gene, new, qual)]
+			
+		line = f.readline()
+	f.close()
+
+	# Write variants out to file.
+	w = open(proteome_file+"."+type+".var", 'w')	
+	for key in start_map.keys():
+		try:
+			in_chr = pos_in_chr[key]
+		except KeyError:
+			w.write("%s\t\t\n")
+			continue
+		in_gene = pos_in_gene[key]
+		w.write("%s\t%s\t%s\n" % (key, ','.join(in_chr), ','.join(in_gene)))
+	w.close()
 
 ### These functions are used everywhere.
 
@@ -488,7 +548,8 @@ if __name__ == "__main__":
 	
 	# Next, create a proteome.bed file containing only variants...probably.
 	# perl $script_root/get_variants.pl "$result_dir/log/proteome.bed" $somatic/merged/merged.vcf S
-	if args.somatic and not som_flag:
+	# both variant scripts seem to be really off from the old one. why!??!?!
+		if args.somatic and not som_flag:
 		get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "S")
 	if args.germline and not germ_flag:
 		get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "G")
