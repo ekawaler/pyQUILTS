@@ -339,7 +339,7 @@ def get_variants(vcf_file, proteome_file, type):
 			# and the names of the genes it goes with. This feels slow and inefficient, so instead
 			# I made some wacked-out tree thing for storage and search. See if you like it!
 			# Whoa okay, tested it, it's much faster.
-			est.add_exon(chr, int(spoffsets[i])+start, int(spoffsets[i])+start+int(splengths[i]), total_exon_length, name)	
+			est.add_exon(chr, int(spoffsets[i])+start, int(spoffsets[i])+start+int(splengths[i])-1, total_exon_length, name)	
 			total_exon_length += int(splengths[i])		
 		line = f.readline()
 	#print est.total_exons
@@ -548,8 +548,12 @@ if __name__ == "__main__":
 	
 	# Next, create a proteome.bed file containing only variants...probably.
 	# perl $script_root/get_variants.pl "$result_dir/log/proteome.bed" $somatic/merged/merged.vcf S
-	# both variant scripts seem to be really off from the old one. why!??!?!
-		if args.somatic and not som_flag:
+	if args.somatic and not som_flag:
 		get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "S")
 	if args.germline and not germ_flag:
 		get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "G")
+	
+	# Combine and sort variants. (sort_variants.pl proteome.bed.dna proteome.bed.var)
+	# It appears that this is the point in the original when overlapping G/S were removed (around line 203)
+	# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
+	# I will continue to do this, probably? I'll just ignore more later on
