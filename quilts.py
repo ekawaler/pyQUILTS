@@ -26,11 +26,14 @@ from datetime import datetime
 from subprocess import call, check_call, CalledProcessError
 import warnings
 from exonSearchTree import ExonSearchTree
+from string import maketrans
+import re
 
 # ahhhh look at these hideous global variables
 global logfile
 global statusfile
 global results_folder
+global codon_map
 
 ### These functions are used in the setup phase.
 
@@ -54,7 +57,7 @@ def parse_input_arguments():
 	parser.add_argument('--threshA', type=int, default=2)
 	parser.add_argument('--threshAN', type=int, default=3)
 	parser.add_argument('--threshN', type=int, default=3)
-	parser.add_argument('--variant_quality_threshold', type=float, default=15.0, help="Quality threshold for variants")
+	parser.add_argument('--variant_quality_threshold', type=float, default=0.0, help="Quality threshold for variants")
 	
 	# Pull out the arguments
 	args = parser.parse_args()
@@ -199,36 +202,38 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 				line = f.readline()
 				continue
 
-			# If we passed those checks, let's say it's good...
-			total_variants += 1
 			# Not sure why we subtract one from pos, but it happened in the original.
 			try:
-				chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1])-1, spline[2], spline[3], spline[4], float(spline[5])
+				chr, pos, id, old, new_array, qual = spline[0].lstrip('chr'), int(spline[1])-1, spline[2], spline[3], spline[4].split(','), float(spline[5])
 			except ValueError:
 				write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
 				line = f.readline()
-				continue	
+				continue				
+					
+			# If we passed those checks, let's say it's good...
+			total_variants += len(new_array) # some lines have multiple variants, annoyingly
 					
 			# Quality check!
 			if qual < quality_threshold:
-				qual_removed += 1
+				qual_removed += len(new_array)
 				line = f.readline()
 				continue
 
-			# Is there a higher-quality version of this variant already found?
-			line_map_key = "%s#%d#%s#%s" % (chr, pos, old, new)
-			if line_map_key in existing_variants:
-				if existing_variants[line_map_key][5] > qual:
-					duplicates_removed += 1
-					line = f.readline()
-					continue
-				else:
-					old_duplicates_removed += 1
+			for new in new_array:
+				# Is there a higher-quality version of this variant already found?
+				line_map_key = "%s#%d#%s#%s" % (chr, pos, old, new)
+				if line_map_key in existing_variants:
+					if existing_variants[line_map_key][5] > qual:
+						duplicates_removed += 1
+						continue
+					else:
+						old_duplicates_removed += 1
 
-			# Passed the other checks? Cool, store the first six fields in our map and continue.
-			# Overwrite the duplicate if it exists.
-			kept_variants += 1
-			existing_variants[line_map_key] = [chr, pos, id, old, new, qual]
+				# Passed the other checks? Cool, store the first six fields in our map and continue.
+				# Overwrite the duplicate if it exists.
+				kept_variants += 1
+				existing_variants[line_map_key] = [chr, pos, id, old, new, qual]
+
 			line = f.readline()
 
 		# Add everything up and write a status line to the log
@@ -302,7 +307,7 @@ def remove_somatic_duplicates(germ_dir, som_dir):
 	write_to_log("Found %d duplicates between somatic and germline variant files. Removed from somatic file. %d somatic variants remain." % (duplicates_found, kept_variants),logfile)
 	shutil.move(som_dir+'/merged_pytest/temp.vcf', som_dir+'/merged_pytest/merged.vcf')
 
-### These functions are used to create bed files of only variants that exist in exons.
+### This function is used to create .bed files of only variants that exist in exons.
 
 def get_variants(vcf_file, proteome_file, type):
 	f = open(proteome_file, 'r')
@@ -314,7 +319,6 @@ def get_variants(vcf_file, proteome_file, type):
 	# QUESTION: In the original, it appears that in proteome.bed.var the pos-- doesn't happen? Why?
 	# Also, somatic hasn't been filtered yet at this step in the original. I think it should be okay that that's changed here - 
 	# the earlier you filter it, the faster the other steps are.
-	# Okay. Compared to the original, it picks up 20 extras. These are all variants that appear at the last base of an exon. I think we actually want to keep them? but I'm not totally sure
 	
 	est = ExonSearchTree()
 	line = f.readline() # Going to assume no headers for now
@@ -389,102 +393,130 @@ def get_variants(vcf_file, proteome_file, type):
 		w.write("%s\t%s\t%s\n" % (key, ','.join(in_chr), ','.join(in_gene)))
 	w.close()
 
-def get_variants_orig(vcf_file, proteome_file, type):
-	''' Not used. Only written for speed comparison.'''
-	# perl $script_root/get_variants.pl "$result_dir/log/proteome.bed" $somatic/merged/merged.vcf S
-	w = open(proteome_file+".var", 'w')
-	f = open(proteome_file, 'r')
+### These functions are used to sort variants by type.
+
+def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
+	global codon_map
 	
-	# Basically goes through proteome.bed and finds all positions in exons
-	# Then goes through the .vcf file and checks if they're in any exons
-	# I think he saves literally every number. I'm going to just have it check if it's between the start and end, should be more efficient
-	# Output line: NP_XX (name) \t type-old(position in genome)new:(quality),(repeat)\t type-old(position in exome)new:(quality),(repeat) Looks like instead of quality it might have taken the wrong field at some point? Sometimes it looks like instead of quality we just get a dot, even when it shouldn't be missing. I'll leave quality in for now and see if we use it later. Output all genes, even if they have no variants.
+	# Ready the translation table for the reverse strand.
+	translate_table = maketrans("ACGTacgt","TCGAtcga")
+	# To translate: first reverse the string (seq = seq[::-1]), then seq.translate(translate_table)
+	# If it's a reverse strand, do the exons also go in reverse order? this must be in the code somewhere
+	# But oh my god is it hard to find. I think...I think it does?
 	
-	start_map = {}
-	lengths_map = {}
-	offsets_map = {}
-	pos_map = {}
-	total_exons = 0
-	line = f.readline() # Going to assume no headers for now
-
-	while line:
-		spline = line.rstrip().split('\t')
-		try:
-			chr, start, name, lengths, offsets = spline[0].lstrip('chr'), int(spline[1]), spline[3], spline[10], spline[11]
-		except ValueError:
-			# Maybe write this to a log somewhere?
-			warnings.warn("Failed to parse %s" % line)
-			line = f.readline()
+	# For each variant in our variants, check if it will become an AA substitution.
+	# Do I check only a single reading frame? At the moment, yes. 
+	# Also: if the length of old != length of new, it's an indel, so ignore.
+	
+	full_seq = ''.join(exon_seqs[1:-1])
+	
+	# if it's a negative strand, reverse it
+	reverse_flag = False
+	if header_line.rstrip().split('\t')[5] == '-':
+		reverse_flag = True
+		full_seq.translate(translate_table)
+		full_seq = full_seq[::-1]
+	
+	changes = []
+	for var in variants:
+		# Remove the ones with multiple nt in the variant
+		# I'm going to remove the ones where both sides have the same number but that number is greater than 1
+		# Just for now.
+		pos = int(re.findall(r'\d+', var)[0])-1 # using the -1 so we're counting from 0, not 1
+		orig_nt = var.split('-')[1].split(str(pos+1))[0]
+		new_nt = var.split(':')[0].split(str(pos+1))[1]
+		if len(orig_nt) != 1 or len(new_nt) != 1:
 			continue
-		start_map[name] = start
-		lengths_map[name] = lengths
-		offsets_map[name] = offsets
-		splengths = lengths.split(',')
-		spoffsets = offsets.split(',')
-		for i in range(len(splengths)):
-			total_exons += 1
-			for j in range(start+int(spoffsets[i]), start+int(spoffsets[i])+int(splengths[i])):
-				identifier = "%s#%d" % (chr, j)
-				pos_map[identifier] = pos_map.get(identifier, "") + name + ","		
-		line = f.readline()
-	#print total_exons
-	f.close()
-
-	f = open(vcf_file, 'r')
-	line = f.readline() # Still assuming no headers
-	pos_in_gene = {}
-	pos_in_chr = {}
-	while line:
-		spline = line.rstrip().split('\t')
-		try:
-			chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1]), spline[2], spline[3], spline[4], float(spline[5])
-		except ValueError:
-			# Maybe write this to a log somewhere?
-			warnings.warn("Failed to parse %s" % line)
-			line = f.readline()
-			continue
-
-		identifier = "%s#%d" % (chr, pos)
-		try:
-			names = pos_map[identifier].split(',')[:-1]
-		except KeyError:
-			line = f.readline()
-			continue
-		for name in names:
-			try:
-				pos_in_chr[name].append("%s-%s%d%s:%f," % (type, old, pos, new, qual))
-			except KeyError:
-				pos_in_chr[name] = ["%s-%s%d%s:%f," % (type, old, pos, new, qual)]
-			lengths = lengths_map[name].split(',')
-			offsets = offsets_map[name].split(',')
-			start = start_map[name]
-			indiv_pos_in_gene = 0
-			for i in range(len(offsets)):
-				if int(offsets[i])+start <= pos <= int(offsets[i])+start+int(lengths[i]):
-					indiv_pos_in_gene += pos-int(offsets[i])-start
-					break
-				else:
-					indiv_pos_in_gene += int(lengths[i])
-			try:
-				pos_in_gene[name].append("%s-%s%d%s:%f," % (type, old, indiv_pos_in_gene, new, qual))
-			except KeyError:
-				pos_in_gene[name] = ["%s-%s%d%s:%f," % (type, old, indiv_pos_in_gene, new, qual)]
+		if reverse_flag:
+			pass # We'll do something with this later
+		# G-C1392G:542.77
+		triplet_start = ((pos/3)*3) # start of the triplet containing pos. counting from 0, not 1
+		triplet_orig = full_seq[triplet_start:(triplet_start+3)].upper()
+		triplet_subst = var.split(':')[0].split(str(pos+1))[-1]
+		subst_pos = pos%3
+		triplet_new = triplet_orig[:subst_pos] + triplet_subst + triplet_orig[subst_pos+1:] # This may change it in both.
+		#print var, triplet_start, triplet_orig, triplet_subst, subst_pos, triplet_new
+		#print full_seq
+		AA_old = codon_map[triplet_orig]
+		AA_new = codon_map[triplet_new]
+		if AA_old != AA_new:
+			changes.append(var)
 			
+	return changes
+		
+
+def sort_variants(proteome_file, variant_file):
+	# sort_variants.pl proteome.bed.dna proteome.bed.var
+	global codon_map
+	
+	# Setting this up here because this is the first time we'll use it. But it won't be the last.
+	codon_map = {"TTT":"F","TTC":"F","TTA":"L","TTG":"L","CTT":"L","CTC":"L","CTA":"L","CTG":"L","ATT":"I","ATC":"I","ATA":"I","ATG":"M","GTT":"V","GTC":"V","GTA":"V","GTG":"V","TCT":"S","TCC":"S","TCA":"S","TCG":"S","CCT":"P","CCC":"P","CCA":"P","CCG":"P","ACT":"T","ACC":"T","ACA":"T","ACG":"T","GCT":"A","GCC":"A","GCA":"A","GCG":"A","TAT":"Y","TAC":"Y","TAA":"*","TAG":"*","CAT":"H","CAC":"H","CAA":"Q","CAG":"Q","AAT":"N","AAC":"N","AAA":"K","AAG":"K","GAT":"D","GAC":"D","GAA":"E","GAG":"E","TGT":"C","TGC":"C","TGA":"*","TGG":"W","CGT":"R","CGC":"R","CGA":"R","CGG":"R","AGT":"S","AGC":"S","AGA":"R","AGG":"R","GGT":"G","GGC":"G","GGA":"G","GGG":"G"}
+	
+	# Grab all the variants and their locations within their genes
+	variants_map = {}
+	f = open(variant_file, 'r')
+	line = f.readline()
+	while line:
+		spline = line.rstrip().split('\t')
+		if len(spline) > 1:
+			split_variants = spline[2].split(',')
+			variants_map[spline[0]] = variants_map.get(spline[0], []) + split_variants
 		line = f.readline()
 	f.close()
+	
+	# Write those to a file, just for kicks/error checking (might remove this later)
+	file_base = proteome_file.rsplit('/',1)[0]
+	'''w = open(variant_file+".SG.combined", 'w')
+	for var in variants_map:
+		w.write("%s\t%s\n" % (var, ','.join(variants_map[var])))
+	w.close()'''
+	
+	# Open some files to write to. Right now, only looking at single AA changes.
+	# I hate these filenames. Do they actually mean anything?
+	out_aa = open(file_base+"/proteome.bed.aa.var", 'w')
+	# This one will basically just be that first line
+	out_aa_bed = open(file_base+"/proteome.aa.var.bed", 'w')
+	out_aa_bed_dna = open(file_base+"/proteome.aa.var.bed.dna", 'w')
+	out_other = open(file_base+"/proteome.bed.other.var", 'w')
+	
+	f = open(proteome_file, 'r')
+	line = f.readline()
+	exon_headers = []
+	exon_seqs = []
+	while line:
+		# Line type one: First gene header line
+		if line[:3] == 'chr':
+			# Finish processing the previous gene - focus first on proteome.bed.aa.var
+			# Using a try/except block here to deal with the possibility of this being the first line
+			# There has to be a more graceful way to do this, right?
+			try:
+				changed_vars = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
+				if changed_vars != []:
+					out_aa.write("%s\t%s\n" % (header_line.split('\t')[3], ','.join(changed_vars)))
+			except UnboundLocalError:
+				pass
+			# Start processing the new gene
+			header_line = line # To be printed to proteome.aa.var.bed, in some form
+			spline = line.rstrip().split('\t')
+			chr, start, end, name, strand, exon_count, exon_lengths, exon_offsets = spline[0].lstrip('chr'), int(spline[1]), int(spline[2]), spline[3], spline[5], int(spline[-3]), spline[-2].split(','), spline[-1].split(',')
+		# Line type two: Second gene header line
+		elif line[0] == '>':
+			second_header = line
+		# Line type three: Exon line (can be pre-100, post-100 or internal)
+		else:
+			exon_headers.append(line.rsplit('\t',1))
+			exon_seqs.append(line.rstrip().split('\t')[-1])
+		# I think we can ignore the pre- and post-100 for now, since they're mostly used for stop codon stuff
+		# Eventually, though, we'll need them.
+		line = f.readline()
 
-	# Write variants out to file.
-	w = open(proteome_file+"."+type+".var", 'w')	
-	for key in start_map.keys():
-		try:
-			in_chr = pos_in_chr[key]
-		except KeyError:
-			w.write("%s\t\t\n")
-			continue
-		in_gene = pos_in_gene[key]
-		w.write("%s\t%s\t%s\n" % (key, ','.join(in_chr), ','.join(in_gene)))
-	w.close()
-
+	# Close everything
+	f.close()
+	out_aa.close()
+	out_aa_bed.close()
+	out_aa_bed_dna.close()
+	out_other.close()
+	
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
@@ -548,12 +580,26 @@ if __name__ == "__main__":
 	
 	# Next, create a proteome.bed file containing only variants...probably.
 	# perl $script_root/get_variants.pl "$result_dir/log/proteome.bed" $somatic/merged/merged.vcf S
+	# I could probably combine them more prettily, but for now I'll just concatenate the files.
 	if args.somatic and not som_flag:
 		get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "S")
 	if args.germline and not germ_flag:
 		get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "G")
-	
-	# Combine and sort variants. (sort_variants.pl proteome.bed.dna proteome.bed.var)
+		
+	# Combine them, not very prettily:
+	if args.somatic and args.germline and not (som_flag or germ_flag):
+		dest = open(results_folder+"/log/proteome.bed.var",'w')
+		for f in [results_folder+"/log/proteome.bed.S.var",results_folder+"/log/proteome.bed.G.var"]:
+			with open(f,'r') as src:
+				shutil.copyfileobj(src, dest)
+		dest.close()
+	elif args.somatic and not som_flag:
+		shutil.copy(results_folder+"/log/proteome.bed.S.var", results_folder+"/log/proteome.bed.var")
+	elif args.germline and not germ_flag:
+		shutil.copy(results_folder+"/log/proteome.bed.G.var", results_folder+"/log/proteome.bed.var")
+		
+	# Combine (some more) and sort variants. (sort_variants.pl proteome.bed.dna proteome.bed.var)
 	# It appears that this is the point in the original when overlapping G/S were removed (around line 203)
 	# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
 	# I will continue to do this, probably? I'll just ignore more later on
+	sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var")
