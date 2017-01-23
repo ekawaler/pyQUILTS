@@ -399,51 +399,46 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 	global codon_map
 	
 	# Ready the translation table for the reverse strand.
-	translate_table = maketrans("ACGTacgt","TCGAtcga")
-	# To translate: first reverse the string (seq = seq[::-1]), then seq.translate(translate_table)
-	# If it's a reverse strand, do the exons also go in reverse order? this must be in the code somewhere
-	# But oh my god is it hard to find. I think...I think it does?
+	translate_table = maketrans("ACGTacgt","TGCAtgca")
 	
 	# For each variant in our variants, check if it will become an AA substitution.
-	# Do I check only a single reading frame? At the moment, yes. 
-	# Also: if the length of old != length of new, it's an indel, so ignore.
-	
+	# Do I check only a single reading frame? That's what they did. 
+	# Also: if the length of old != length of new, it's an indel, so ignore for now.	
 	full_seq = ''.join(exon_seqs[1:-1])
 	
-	# if it's a negative strand, reverse it
+	# Set a flag for a reverse gene
 	reverse_flag = False
-	if header_line.rstrip().split('\t')[5] == '-':
+	if header_line.split('\t')[5] == '-':
 		reverse_flag = True
-		full_seq.translate(translate_table)
-		full_seq = full_seq[::-1]
 	
 	changes = []
 	for var in variants:
 		# Remove the ones with multiple nt in the variant
 		# I'm going to remove the ones where both sides have the same number but that number is greater than 1
 		# Just for now.
-		pos = int(re.findall(r'\d+', var)[0])-1 # using the -1 so we're counting from 0, not 1
-		orig_nt = var.split('-')[1].split(str(pos+1))[0]
-		new_nt = var.split(':')[0].split(str(pos+1))[1]
+		pos = int(re.findall(r'\d+', var)[0]) # using the -1 so we're counting from 0, not 1
+		orig_nt = var.split('-')[1].split(str(pos))[0]
+		new_nt = var.split(':')[0].split(str(pos))[1]
 		if len(orig_nt) != 1 or len(new_nt) != 1:
 			continue
-		if reverse_flag:
-			pass # We'll do something with this later
-		# G-C1392G:542.77
 		triplet_start = ((pos/3)*3) # start of the triplet containing pos. counting from 0, not 1
 		triplet_orig = full_seq[triplet_start:(triplet_start+3)].upper()
-		triplet_subst = var.split(':')[0].split(str(pos+1))[-1]
+		triplet_subst = var.split(':')[0].split(str(pos))[-1]
 		subst_pos = pos%3
 		triplet_new = triplet_orig[:subst_pos] + triplet_subst + triplet_orig[subst_pos+1:] # This may change it in both.
-		#print var, triplet_start, triplet_orig, triplet_subst, subst_pos, triplet_new
-		#print full_seq
+		# If it's the reverse strand, check the reversed and translated triplet instead
+		# I guess the .vcf files are based on proteome.bed.dna? So the position and nucleotides refer
+		# to the negative strand if proteome.bed.dna only has the negative strand.
+		if reverse_flag:
+			triplet_orig = triplet_orig[::-1].translate(translate_table)
+			triplet_new = triplet_new[::-1].translate(translate_table)
 		AA_old = codon_map[triplet_orig]
 		AA_new = codon_map[triplet_new]
-		if AA_old != AA_new:
+		# If neither the old nor the new codon is a stop codon and the AA changes,
+		# count it!
+		if AA_old != AA_new and AA_new != '*' and AA_old != '*':
 			changes.append(var)
-			
 	return changes
-		
 
 def sort_variants(proteome_file, variant_file):
 	# sort_variants.pl proteome.bed.dna proteome.bed.var
@@ -481,8 +476,6 @@ def sort_variants(proteome_file, variant_file):
 	
 	f = open(proteome_file, 'r')
 	line = f.readline()
-	exon_headers = []
-	exon_seqs = []
 	while line:
 		# Line type one: First gene header line
 		if line[:3] == 'chr':
@@ -492,10 +485,12 @@ def sort_variants(proteome_file, variant_file):
 			try:
 				changed_vars = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 				if changed_vars != []:
-					out_aa.write("%s\t%s\n" % (header_line.split('\t')[3], ','.join(changed_vars)))
+					out_aa.write("%s\t%s\t%s\n" % (header_line.split('\t')[3], ','.join(changed_vars), strand))
 			except UnboundLocalError:
 				pass
 			# Start processing the new gene
+			exon_headers = []
+			exon_seqs = []
 			header_line = line # To be printed to proteome.aa.var.bed, in some form
 			spline = line.rstrip().split('\t')
 			chr, start, end, name, strand, exon_count, exon_lengths, exon_offsets = spline[0].lstrip('chr'), int(spline[1]), int(spline[2]), spline[3], spline[5], int(spline[-3]), spline[-2].split(','), spline[-1].split(',')
@@ -509,6 +504,14 @@ def sort_variants(proteome_file, variant_file):
 		# I think we can ignore the pre- and post-100 for now, since they're mostly used for stop codon stuff
 		# Eventually, though, we'll need them.
 		line = f.readline()
+		
+	# Do the last one
+	try:
+		changed_vars = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
+		if changed_vars != []:
+			out_aa.write("%s\t%s\n" % (header_line.split('\t')[3], ','.join(changed_vars)))
+	except UnboundLocalError:
+		pass
 
 	# Close everything
 	f.close()
