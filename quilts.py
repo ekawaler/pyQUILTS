@@ -412,6 +412,8 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		reverse_flag = True
 	
 	changes = []
+	prev_start = -1 # Previous codon start position
+	prev_subst = [-1, ''] # Previous substitution position and nucleotide
 	for var in variants:
 		# Remove the ones with multiple nt in the variant
 		# I'm going to remove the ones where both sides have the same number but that number is greater than 1
@@ -425,7 +427,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		triplet_orig = full_seq[triplet_start:(triplet_start+3)].upper()
 		triplet_subst = var.split(':')[0].split(str(pos))[-1]
 		subst_pos = pos%3
-		triplet_new = triplet_orig[:subst_pos] + triplet_subst + triplet_orig[subst_pos+1:] # This may change it in both.
+		triplet_new = triplet_orig[:subst_pos] + triplet_subst + triplet_orig[subst_pos+1:] # This did! change it in both.
 		# If it's the reverse strand, check the reversed and translated triplet instead
 		# I guess the .vcf files are based on proteome.bed.dna? So the position and nucleotides refer
 		# to the negative strand if proteome.bed.dna only has the negative strand.
@@ -434,10 +436,32 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 			triplet_new = triplet_new[::-1].translate(translate_table)
 		AA_old = codon_map[triplet_orig]
 		AA_new = codon_map[triplet_new]
+		#print header_line.split('\t')[3]+'\t'+var+'\t'+triplet_orig+'\t'+triplet_new+'\t'+full_seq[subst_pos-3:subst_pos+6]
 		# If neither the old nor the new codon is a stop codon and the AA changes,
 		# count it!
 		if AA_old != AA_new and AA_new != '*' and AA_old != '*':
 			changes.append(var)
+			
+		# Check to see if this is the second substitution in a codon - if so, does the amino acid change with both?
+		if prev_start == triplet_start:
+			triplet_orig = full_seq[triplet_start:(triplet_start+3)].upper()
+			triplet_new = list(triplet_orig)
+			triplet_new[subst_pos] = triplet_subst
+			triplet_new[prev_subst[0]] = prev_subst[1]
+			triplet_new = ''.join(triplet_new)
+			if reverse_flag:
+				triplet_orig = triplet_orig[::-1].translate(translate_table)
+				triplet_new = triplet_new[::-1].translate(translate_table)
+			AA_old = codon_map[triplet_orig]
+			AA_new = codon_map[triplet_new]
+			#print header_line.split('\t')[3]+'\t'+var+'\t'+str(prev_subst[0])+'\t'+prev_subst[1]+'\t'+triplet_orig+'\t'+triplet_new+'\t'+full_seq[subst_pos-3:subst_pos+6]
+			#print full_seq
+			if AA_old != AA_new and AA_new != '*' and AA_old != '*':
+				# G-A2158G:2281.770000
+				change = "X-%s%d%s:0.0" % (triplet_orig, triplet_start, triplet_new)
+				changes.append(change)
+		prev_start = triplet_start
+		prev_subst = [subst_pos, triplet_subst]
 	return changes
 
 def sort_variants(proteome_file, variant_file):
@@ -469,9 +493,11 @@ def sort_variants(proteome_file, variant_file):
 	# Open some files to write to. Right now, only looking at single AA changes.
 	# I hate these filenames. Do they actually mean anything?
 	out_aa = open(file_base+"/proteome.bed.aa.var", 'w')
-	# This one will basically just be that first line
+	# This one will basically just be that first line. Might want an extra line for each variant though, depends how it's used
 	out_aa_bed = open(file_base+"/proteome.aa.var.bed", 'w')
+	# proteome.bed.dna, but with the variants included. Def want an extra line for each variant.
 	out_aa_bed_dna = open(file_base+"/proteome.aa.var.bed.dna", 'w')
+	# Right now just proteome.bed.aa.var but with the non-AA variants.
 	out_other = open(file_base+"/proteome.bed.other.var", 'w')
 	
 	f = open(proteome_file, 'r')
@@ -485,7 +511,7 @@ def sort_variants(proteome_file, variant_file):
 			try:
 				changed_vars = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 				if changed_vars != []:
-					out_aa.write("%s\t%s\t%s\n" % (header_line.split('\t')[3], ','.join(changed_vars), strand))
+					out_aa.write("%s\t%s,\n" % (header_line.split('\t')[3], ','.join(changed_vars)))
 			except UnboundLocalError:
 				pass
 			# Start processing the new gene
@@ -501,15 +527,13 @@ def sort_variants(proteome_file, variant_file):
 		else:
 			exon_headers.append(line.rsplit('\t',1))
 			exon_seqs.append(line.rstrip().split('\t')[-1])
-		# I think we can ignore the pre- and post-100 for now, since they're mostly used for stop codon stuff
-		# Eventually, though, we'll need them.
 		line = f.readline()
 		
 	# Do the last one
 	try:
 		changed_vars = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 		if changed_vars != []:
-			out_aa.write("%s\t%s\n" % (header_line.split('\t')[3], ','.join(changed_vars)))
+			out_aa.write("%s\t%s,\n" % (header_line.split('\t')[3], ','.join(changed_vars)))
 	except UnboundLocalError:
 		pass
 
