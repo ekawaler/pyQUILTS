@@ -122,7 +122,16 @@ def set_up_output_dir(output_dir, ref_proteome):
 		shutil.copy(ref_proteome+"/proteome.bed",results_folder+"/log/")
 	except IOError:
 		raise SystemExit("ERROR: Reference proteome .bed file not found at "+ref_proteome+"/proteome.bed.\nAborting program.")
-		
+	# Not sure if these two should be quite so important.
+	try:
+		shutil.copy(ref_proteome+"/proteome-descriptions.txt",results_folder+"/log/")
+	except IOError:
+		raise SystemExit("ERROR: Reference proteome gene descriptions file not found at "+ref_proteome+"/proteome-descriptions.txt.\nAborting program.")
+	try:
+		shutil.copy(ref_proteome+"/proteome-genes.txt",results_folder+"/log/")
+	except IOError:
+		raise SystemExit("ERROR: Reference proteome gene names file not found at "+ref_proteome+"/proteome-genes.txt.\nAborting program.")
+	
 	return results_folder
 
 ### These functions are for merging and quality checking the variant files.
@@ -445,7 +454,11 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		# count it!
 		if AA_old != AA_new and AA_new != '*' and AA_old != '*':
 			changes.append(var)
-			aa_substs.append((AA_old, pos/3+1, AA_new))
+			if reverse_flag:
+				total_AA = len(full_seq)/3
+				aa_substs.append((AA_old, total_AA-(pos/3), AA_new))
+			else:
+				aa_substs.append((AA_old, pos/3+1, AA_new))
 			
 		# Check to see if this is the second substitution in a codon - if so, does the amino acid change with both?
 		if prev_start == triplet_start:
@@ -465,7 +478,11 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 				# G-A2158G:2281.770000
 				change = "X-%s%d%s:0.0" % (triplet_orig, triplet_start, triplet_new)
 				changes.append(change)
-				aa_substs.append((AA_old, pos/3+1, AA_new))
+				if reverse_flag:
+					total_AA = len(full_seq)/3
+					aa_substs.append((AA_old, total_AA-(pos/3), AA_new))
+				else:
+					aa_substs.append((AA_old, pos/3+1, AA_new))
 		prev_start = triplet_start
 		prev_subst = [subst_pos, triplet_subst]
 	return changes, aa_substs
@@ -498,7 +515,7 @@ def write_out_aa_bed_dna(header_line, second_header, exon_headers, changed_vars,
 		# Second line:
 		second_header[0] = second_header_name+'-'+v
 		second_header[-1] = second_header_map_end[:-2]+' '+var+')'
-		out_aa_bed_dna.write(' '.join(second_header)+(' (VAR:%s-%s%d%s:%s)\n' % (var[0], subst[0], subst[1], subst[2], var.split(':')[1])))
+		out_aa_bed_dna.write(' '.join(second_header)+(' (VAR:%s-%s%d%s:%s)\n' % (var[0], subst[0], subst[1], subst[2], var.split(':')[1]))) # Will write the AA position starting from 0, not 1. This is what old QUILTS did. We can change it.
 		# Sequence lines:
 		out_aa_bed_dna.write('\t'.join(exon_headers[0]))
 		var_pos = int(re.findall(r'\d+', var)[0])
@@ -602,6 +619,87 @@ def sort_variants(proteome_file, variant_file):
 	out_aa_bed_dna.close()
 	out_other.close()
 	
+### These functions are used to translate DNA variants into variant proteins.
+
+def translate_seq(sequence, strand):
+	global codon_map
+	
+	if strand == '-':
+		translate_table = maketrans("ACGTacgt","TGCAtgca")
+		sequence = sequence[::-1].translate(translate_table)
+	
+	# Didn't find any of these yet, just takes up time. Should probably have a check like this in there more formally.
+	#if len(sequence)%3 != 0:
+	#	warnings.warn("Found sequence with length indivisible by 3!")
+	
+	translated = ''
+	for i in range(0,len(sequence)-5,3):
+		# Removing the stop codon, I guess.
+		translated += codon_map[sequence[i:i+3]]
+		
+	return translated
+
+def translate(log_dir):
+	# Get the descriptions
+	desc = {}
+	f = open(log_dir+"proteome-descriptions.txt",'r')
+	line = f.readline()
+	while line:
+		spline = line.rstrip().split('\t')
+		desc[spline[0]] = spline[1]
+		line = f.readline()
+	f.close()
+	# Get the gene abbreviations
+	abbr = {}
+	f = open(log_dir+"proteome-genes.txt",'r')
+	line = f.readline()
+	while line:
+		spline = line.rstrip().split()
+		abbr[spline[0]] = spline[-1]
+		line = f.readline()
+	f.close()
+	
+	# The rest of it
+	f = open(log_dir+"proteome.aa.var.bed.dna",'r')
+	out_fasta = open(log_dir+"proteome.aa.var.bed.dna.fasta",'w') # The original QUILTS writes two other files but they're just duplicates of proteome.aa.var.bed and proteome.aa.var.bed.dna, it seems. For now I'm leaving them out.
+	line = f.readline()
+	sequence = ""
+	while line:
+		# Line type one: First gene header line
+		if line[:3] == 'chr':
+			# Finish processing the previous gene - focus first on proteome.bed.aa.var
+			# Using a try/except block here to deal with the possibility of this being the first line
+			# There has to be a more graceful way to do that, right?
+			try:
+				translated = translate_seq(sequence.upper(), strand)
+				out_fasta.write(second_header)
+				out_fasta.write(translated+'\n')
+			except UnboundLocalError:
+				pass
+			# Start processing the new gene
+			sequence = ""
+			strand = line.split('\t')[5]
+		# Line type two: Second gene header line
+		elif line[0] == '>':
+			second_header = line # This will be the header in the fasta file
+		# Line type three: Exon line (can be pre-100, post-100 or internal)
+		else:
+			spline = line.rstrip().split('\t')
+			if spline[1] != '-1' and spline[1] != '+1':
+				sequence += spline[-1]
+		line = f.readline()
+		
+	# And finish the last one
+	try:
+		translated = translate_seq(sequence, strand)
+		out_fasta.write(second_header)
+		out_fasta.write(translated+'\n')
+	except UnboundLocalError:
+		pass
+
+	f.close()
+	out_fasta.close()
+
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
@@ -686,3 +784,6 @@ if __name__ == "__main__":
 	# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
 	# I will continue to do this, probably? I'll just ignore more later on
 	sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var")
+	
+	# Translate the variant sequences into a fasta file.
+	translate(results_folder+"/log/")
