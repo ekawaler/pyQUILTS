@@ -622,6 +622,7 @@ def sort_variants(proteome_file, variant_file):
 ### These functions are used to translate DNA variants into variant proteins.
 
 def translate_seq(sequence, strand):
+	'''Translates a DNA sequence to an AA sequence'''
 	global codon_map
 	
 	if strand == '-':
@@ -640,6 +641,7 @@ def translate_seq(sequence, strand):
 	return translated
 
 def translate(log_dir):
+	'''Reads in a bed.dna file and translates it to a protein .fasta file.'''
 	# Get the descriptions
 	desc = {}
 	f = open(log_dir+"proteome-descriptions.txt",'r')
@@ -664,6 +666,7 @@ def translate(log_dir):
 	out_fasta = open(log_dir+"proteome.aa.var.bed.dna.fasta",'w') # The original QUILTS writes two other files but they're just duplicates of proteome.aa.var.bed and proteome.aa.var.bed.dna, it seems. For now I'm leaving them out.
 	line = f.readline()
 	sequence = ""
+	prev_AA_subst = ''
 	while line:
 		# Line type one: First gene header line
 		if line[:3] == 'chr':
@@ -671,9 +674,11 @@ def translate(log_dir):
 			# Using a try/except block here to deal with the possibility of this being the first line
 			# There has to be a more graceful way to do that, right?
 			try:
-				translated = translate_seq(sequence.upper(), strand)
-				out_fasta.write(second_header)
-				out_fasta.write(translated+'\n')
+				if AA_subst != prev_AA_subst:
+					translated = translate_seq(sequence.upper(), strand)
+					out_fasta.write(second_header)
+					out_fasta.write(translated+'\n')
+				prev_AA_subst = AA_subst
 			except UnboundLocalError:
 				pass
 			# Start processing the new gene
@@ -682,6 +687,7 @@ def translate(log_dir):
 		# Line type two: Second gene header line
 		elif line[0] == '>':
 			second_header = line # This will be the header in the fasta file
+			AA_subst = line.rsplit('-',1)[-1].split(':')[0]
 		# Line type three: Exon line (can be pre-100, post-100 or internal)
 		else:
 			spline = line.rstrip().split('\t')
@@ -691,9 +697,10 @@ def translate(log_dir):
 		
 	# And finish the last one
 	try:
-		translated = translate_seq(sequence, strand)
-		out_fasta.write(second_header)
-		out_fasta.write(translated+'\n')
+		if AA_subst != prev_AA_subst:
+			translated = translate_seq(sequence, strand)
+			out_fasta.write(second_header)
+			out_fasta.write(translated+'\n')
 	except UnboundLocalError:
 		pass
 
@@ -787,3 +794,5 @@ if __name__ == "__main__":
 	
 	# Translate the variant sequences into a fasta file.
 	translate(results_folder+"/log/")
+	
+	# Time for tryptic peptides!
