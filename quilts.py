@@ -16,6 +16,8 @@ are real unwieldy. Should be able to move various "does this file actually exist
 
 Another definite thing: change all merged_pytest to merged
 
+Instead of doing by protein, maybe do by tryptic peptide? This won't blow up our number of possibilities that much (wait, or will it?), but will functionally do the same thing as keeping every protein configuration. This means the output .fasta will have tryptic peptides instead of full proteins. And in the future, add options for other digestion methods. This will require some clever function creation. You can do it, Emily! It will also require checking for changes in digestion due to AA variants (addition/deletion of K/R). What other complications do I need to watch out for?
+
 Emily Kawaler
 '''
 
@@ -396,6 +398,7 @@ def get_variants(vcf_file, proteome_file, type):
 ### These functions are used to sort variants by type.
 
 def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
+	'''Checks all variants in a gene for whether or not they cause a single-AA non-stop substitution. Returns a list of the ones that do, and the AA substitutions they cause.'''
 	global codon_map
 	
 	# Ready the translation table for the reverse strand.
@@ -412,6 +415,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		reverse_flag = True
 	
 	changes = []
+	aa_substs = []
 	prev_start = -1 # Previous codon start position
 	prev_subst = [-1, ''] # Previous substitution position and nucleotide
 	for var in variants:
@@ -441,6 +445,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		# count it!
 		if AA_old != AA_new and AA_new != '*' and AA_old != '*':
 			changes.append(var)
+			aa_substs.append((AA_old, pos/3+1, AA_new))
 			
 		# Check to see if this is the second substitution in a codon - if so, does the amino acid change with both?
 		if prev_start == triplet_start:
@@ -460,12 +465,61 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 				# G-A2158G:2281.770000
 				change = "X-%s%d%s:0.0" % (triplet_orig, triplet_start, triplet_new)
 				changes.append(change)
+				aa_substs.append((AA_old, pos/3+1, AA_new))
 		prev_start = triplet_start
 		prev_subst = [subst_pos, triplet_subst]
-	return changes
+	return changes, aa_substs
 
+def write_out_aa(name, changed_vars, out_aa):
+	'''Creates the proteome.bed.aa.var file, which is just a list of all variants in the style of proteome.bed.var.'''
+	out_aa.write("%s\t%s,\n" % (name, ','.join(changed_vars)))
+
+def write_out_aa_bed(header_line, changed_vars, out_aa_bed):
+	'''Creates the proteome.aa.var.bed file, which is basically a collection of the header lines for each entry in proteome.aa.var.bed.dna.'''
+	to_change = header_line[3]
+	for var in changed_vars:
+		v = var.split(':')[0]
+		header_line[3] = to_change+'-'+v
+		out_aa_bed.write('\t'.join(header_line))
+
+def write_out_aa_bed_dna(header_line, second_header, exon_headers, changed_vars, aa_substs, out_aa_bed_dna):
+	'''Creates the proteome.aa.bed.var.dna file, which is the same as proteome.bed.dna but instead of an entry for each gene, has an entry for each variant of each gene. It's a bit unwieldy, but it is what it is.'''
+	# Maybe also add a line with all of the variants?
+	header_to_change = header_line[3]
+	second_header_name = second_header[0]
+	second_header_map_end = second_header[-1]
+	for i in range(len(changed_vars)):
+		var = changed_vars[i]
+		subst = aa_substs[i]
+		# First line:
+		v = var.split(':')[0]
+		header_line[3] = header_to_change+'-'+v
+		out_aa_bed_dna.write('\t'.join(header_line))
+		# Second line:
+		second_header[0] = second_header_name+'-'+v
+		second_header[-1] = second_header_map_end[:-2]+' '+var+')'
+		out_aa_bed_dna.write(' '.join(second_header)+(' (VAR:%s-%s%d%s:%s)\n' % (var[0], subst[0], subst[1], subst[2], var.split(':')[1])))
+		# Sequence lines:
+		out_aa_bed_dna.write('\t'.join(exon_headers[0]))
+		var_pos = int(re.findall(r'\d+', var)[0])
+		seq_length = 0
+		edit_made = False
+		for i in range(1,len(exon_headers)-1):
+			chunk_length = int(exon_headers[i][0].split('\t')[4])
+			if edit_made or seq_length+chunk_length <= var_pos:
+				out_aa_bed_dna.write('\t'.join(exon_headers[i]))
+			else:
+				seq_chunk = exon_headers[i][-1]
+				seq_var = var.split(':')[0].split(str(var_pos))[1]
+				chunk_pos = var_pos-seq_length
+				seq_chunk = seq_chunk[:chunk_pos]+seq_var+seq_chunk[chunk_pos+len(seq_var):]
+				out_aa_bed_dna.write(exon_headers[i][0]+'\t'+seq_chunk)
+				edit_made = True
+			seq_length += chunk_length
+		out_aa_bed_dna.write('\t'.join(exon_headers[-1]))
+		
 def sort_variants(proteome_file, variant_file):
-	# sort_variants.pl proteome.bed.dna proteome.bed.var
+	'''Goes through the variants and sorts them by type, writing out a bunch of intermediate files in the process. Right now the types are "single-AA non-stop variant" and "not that", but eventually will have more.'''
 	global codon_map
 	
 	# Setting this up here because this is the first time we'll use it. But it won't be the last.
@@ -493,11 +547,11 @@ def sort_variants(proteome_file, variant_file):
 	# Open some files to write to. Right now, only looking at single AA changes.
 	# I hate these filenames. Do they actually mean anything?
 	out_aa = open(file_base+"/proteome.bed.aa.var", 'w')
-	# This one will basically just be that first line. Might want an extra line for each variant though, depends how it's used
+	# This one will basically just be that first line. Might want an extra line for each variant though, depends how it's used. Actually, almost certainly do.
 	out_aa_bed = open(file_base+"/proteome.aa.var.bed", 'w')
 	# proteome.bed.dna, but with the variants included. Def want an extra line for each variant.
 	out_aa_bed_dna = open(file_base+"/proteome.aa.var.bed.dna", 'w')
-	# Right now just proteome.bed.aa.var but with the non-AA variants.
+	# Right now just proteome.bed.aa.var but with the non-AA variants. Doesn't do anything right now because I don't care about it very much.
 	out_other = open(file_base+"/proteome.bed.other.var", 'w')
 	
 	f = open(proteome_file, 'r')
@@ -507,11 +561,13 @@ def sort_variants(proteome_file, variant_file):
 		if line[:3] == 'chr':
 			# Finish processing the previous gene - focus first on proteome.bed.aa.var
 			# Using a try/except block here to deal with the possibility of this being the first line
-			# There has to be a more graceful way to do this, right?
+			# There has to be a more graceful way to do that, right?
 			try:
-				changed_vars = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
+				changed_vars, aa_substs = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 				if changed_vars != []:
-					out_aa.write("%s\t%s,\n" % (header_line.split('\t')[3], ','.join(changed_vars)))
+					write_out_aa(name, changed_vars, out_aa)
+					write_out_aa_bed(header_line.split('\t'), changed_vars, out_aa_bed)
+					write_out_aa_bed_dna(header_line.split('\t'), second_header.split(), exon_headers, changed_vars, aa_substs, out_aa_bed_dna)
 			except UnboundLocalError:
 				pass
 			# Start processing the new gene
@@ -531,9 +587,11 @@ def sort_variants(proteome_file, variant_file):
 		
 	# Do the last one
 	try:
-		changed_vars = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
+		changed_vars, aa_substs = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 		if changed_vars != []:
-			out_aa.write("%s\t%s,\n" % (header_line.split('\t')[3], ','.join(changed_vars)))
+			write_out_aa(name, changed_vars, out_aa)
+			write_out_aa_bed(header_line.split('\t'), changed_vars, out_aa_bed)
+			write_out_aa_bed_dna(header_line.split('\t'), second_header.split(), exon_headers, changed_vars, aa_substs, out_aa_bed_dna)
 	except UnboundLocalError:
 		pass
 
@@ -606,7 +664,6 @@ if __name__ == "__main__":
 	shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/proteome.bed.dna', results_folder+"/log/")
 	
 	# Next, create a proteome.bed file containing only variants...probably.
-	# perl $script_root/get_variants.pl "$result_dir/log/proteome.bed" $somatic/merged/merged.vcf S
 	# I could probably combine them more prettily, but for now I'll just concatenate the files.
 	if args.somatic and not som_flag:
 		get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "S")
@@ -625,8 +682,7 @@ if __name__ == "__main__":
 	elif args.germline and not germ_flag:
 		shutil.copy(results_folder+"/log/proteome.bed.G.var", results_folder+"/log/proteome.bed.var")
 		
-	# Combine (some more) and sort variants. (sort_variants.pl proteome.bed.dna proteome.bed.var)
-	# It appears that this is the point in the original when overlapping G/S were removed (around line 203)
+	# Combine (some more) and sort variants.
 	# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
 	# I will continue to do this, probably? I'll just ignore more later on
 	sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var")
