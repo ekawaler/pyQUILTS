@@ -31,7 +31,7 @@ for k in keep1:
 w.write("\nOnly in %s\n" % sys.argv[2])
 for k in keep2:
 	w.write(keep2[k]+'\n')
-w.close()'''
+w.close()
 
 # Now I want to check if the entire line is the same.
 f = open(sys.argv[1],'r')
@@ -49,6 +49,48 @@ for line in f.readlines():
 			keep1.discard(line)
 		else:
 			keep2.add(line)
+f.close()
+
+
+w = open('compare_vars.txt','w')
+w.write("Only in %s\n" % sys.argv[1])
+for k in keep1:
+	w.write(k)
+w.write("\nOnly in %s\n" % sys.argv[2])
+for k in keep2:
+	w.write(k)
+w.close()'''
+
+# Now I want to check if the variants are the same, because quality is currently messed up
+f = open(sys.argv[1],'r')
+keep1 = set([])
+for line in f.readlines():
+	spline = line.rstrip().split('\t')
+	to_write = spline[0]+'\t'
+	tmp = []
+	for item in spline[1].split(','):
+		tmp.append(item.split(':')[0])
+	tmp.sort()
+	to_write += ','.join(tmp)
+	to_write += '\n'
+	keep1.add(to_write)
+f.close()
+
+f = open(sys.argv[2],'r')
+keep2 = set([])
+for line in f.readlines():
+	spline = line.rstrip().split('\t')
+	to_write = spline[0]+'\t'
+	tmp = []
+	for item in spline[1].split(','):
+		tmp.append(item.split(':')[0])
+	tmp.sort()
+	to_write += ','.join(tmp)
+	to_write += '\n'
+	if to_write in keep1:
+		keep1.discard(to_write)
+	else:
+		keep2.add(to_write)
 f.close()
 
 
