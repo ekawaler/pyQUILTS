@@ -670,7 +670,7 @@ def translate(log_dir):
 	out_fasta = open(log_dir+"proteome.aa.var.bed.dna.fasta",'w') # The original QUILTS writes two other files but they're just duplicates of proteome.aa.var.bed and proteome.aa.var.bed.dna, it seems. For now I'm leaving them out.
 	line = f.readline()
 	sequence = ""
-	prev_AA_subst = ''
+	prev_AA_subst = []
 	prev_gene = ''
 	while line:
 		# Line type one: First gene header line
@@ -679,11 +679,13 @@ def translate(log_dir):
 			# Using a try/except block here to deal with the possibility of this being the first line
 			# There has to be a more graceful way to do that, right?
 			try:
-				if prev_gene != gene or AA_subst != prev_AA_subst:
+				if prev_gene != gene:
+					prev_AA_subst = []
+				if AA_subst not in prev_AA_subst:
 					translated = translate_seq(sequence.upper(), strand)
 					out_fasta.write(second_header)
 					out_fasta.write(translated+'\n')
-				prev_AA_subst = AA_subst
+				prev_AA_subst.append(AA_subst)
 				prev_gene = gene
 			except UnboundLocalError:
 				pass
@@ -746,9 +748,10 @@ def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
 	for var in vars:
 		variant = vars[var]
 		pos = var-peptide_start_pos-1
-		new_pep = peptide[:pos]+variant[1]+peptide[pos+1:]
-		out_file.write('>%s VAR:%s%d%s\n' % (gene, variant[0], var, variant[1]))
-		out_file.write('%s\n' % new_pep)
+		for v in variant:
+			new_pep = peptide[:pos]+v[1]+peptide[pos+1:]
+			out_file.write('>%s VAR:%s%d%s\n' % (gene, v[0], var, v[1]))
+			out_file.write('%s\n' % new_pep)
 
 def assign_variants(gene, tryptic_peptides, variants, out_file):
 	'''Figures out which variants belong to each tryptic peptide then calls the function that writes the peptide out to the file'''
@@ -757,7 +760,9 @@ def assign_variants(gene, tryptic_peptides, variants, out_file):
 	vars = {}
 	for var in var_set:
 		pos = int(re.findall(r'\d+', var)[0])
-		vars[pos] = var.split(str(pos))	
+		tmp = vars.get(pos, [])
+		tmp.append(var.split(str(pos)))
+		vars[pos] = tmp
 	# For each tryptic peptide, decide which variants belong and then call a function to write them out
 	total_aas = 0
 	for i in range(len(tryptic_peptides)):
