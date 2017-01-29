@@ -30,6 +30,7 @@ import warnings
 from exonSearchTree import ExonSearchTree
 from string import maketrans
 import re
+from itertools import chain, combinations
 
 # ahhhh look at these hideous global variables
 global logfile
@@ -559,10 +560,10 @@ def sort_variants(proteome_file, variant_file):
 	
 	# Write those to a file, just for kicks/error checking (might remove this later)
 	file_base = proteome_file.rsplit('/',1)[0]
-	'''w = open(variant_file+".SG.combined", 'w')
+	w = open(variant_file+".SG.combined", 'w')
 	for var in variants_map:
 		w.write("%s\t%s\n" % (var, ','.join(variants_map[var])))
-	w.close()'''
+	w.close()
 	
 	# Open some files to write to. Right now, only looking at single AA changes.
 	# I hate these filenames. Do they actually mean anything?
@@ -670,6 +671,7 @@ def translate(log_dir):
 	line = f.readline()
 	sequence = ""
 	prev_AA_subst = ''
+	prev_gene = ''
 	while line:
 		# Line type one: First gene header line
 		if line[:3] == 'chr':
@@ -677,16 +679,18 @@ def translate(log_dir):
 			# Using a try/except block here to deal with the possibility of this being the first line
 			# There has to be a more graceful way to do that, right?
 			try:
-				if AA_subst != prev_AA_subst:
+				if prev_gene != gene or AA_subst != prev_AA_subst:
 					translated = translate_seq(sequence.upper(), strand)
 					out_fasta.write(second_header)
 					out_fasta.write(translated+'\n')
 				prev_AA_subst = AA_subst
+				prev_gene = gene
 			except UnboundLocalError:
 				pass
 			# Start processing the new gene
 			sequence = ""
 			strand = line.split('\t')[5]
+			gene = line.split('\t')[3].split('-')[0]
 		# Line type two: Second gene header line
 		elif line[0] == '>':
 			second_header = line # This will be the header in the fasta file
@@ -700,7 +704,7 @@ def translate(log_dir):
 		
 	# And finish the last one
 	try:
-		if AA_subst != prev_AA_subst:
+		if prev_gene != gene or AA_subst != prev_AA_subst:
 			translated = translate_seq(sequence, strand)
 			out_fasta.write(second_header)
 			out_fasta.write(translated+'\n')
@@ -724,10 +728,21 @@ def trypsinize(sequence):
 	tryptic_peptides.append(seq)
 	return tryptic_peptides
 
+def get_powerset(vars):
+	'''Gets all combinations of variables in a peptide.'''
+	return chain.from_iterable(combinations(var, n) for n in range(len(var)+1))
+
 def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
 	# SUPER UNFINISHED
 	# Right now, just one peptide for each variant.
 	# Tomorrow, write up the different combinations.
+	'''var_combos = get_powerset(vars)
+	for var_set in var_combos:
+		for var in var_set:
+			variant = vars[var]
+			pos = var-peptide_start_pos-1
+			new_pep = peptide[:pos]+variant[1]+peptide[pos+1:]
+	'''
 	for var in vars:
 		variant = vars[var]
 		pos = var-peptide_start_pos-1
@@ -736,12 +751,14 @@ def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
 		out_file.write('%s\n' % new_pep)
 
 def assign_variants(gene, tryptic_peptides, variants, out_file):
+	'''Figures out which variants belong to each tryptic peptide then calls the function that writes the peptide out to the file'''
 	# Get positions and original/changed AAs in a workable format
 	var_set = set(variants) # remove duplicates
 	vars = {}
 	for var in var_set:
 		pos = int(re.findall(r'\d+', var)[0])
-		vars[pos] = var.split(str(pos))
+		vars[pos] = var.split(str(pos))	
+	# For each tryptic peptide, decide which variants belong and then call a function to write them out
 	total_aas = 0
 	for i in range(len(tryptic_peptides)):
 		peptide = tryptic_peptides[i]
@@ -750,6 +767,7 @@ def assign_variants(gene, tryptic_peptides, variants, out_file):
 		total_aas += len(peptide)
 
 def make_peptide_fasta(log_dir):
+	'''Main function for the tryptic peptide fasta file.'''
 	# Grab all of the amino acid variants
 	vars = {}
 	f = open(log_dir+'proteome.bed.aa.var','r')
