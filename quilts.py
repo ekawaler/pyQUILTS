@@ -487,9 +487,12 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		prev_subst = [subst_pos, triplet_subst]
 	return changes, aa_substs
 
-def write_out_aa(name, changed_vars, out_aa):
+def write_out_aa(name, changed_vars, aa_substs, out_aa):
 	'''Creates the proteome.bed.aa.var file, which is just a list of all variants in the style of proteome.bed.var.'''
-	out_aa.write("%s\t%s,\n" % (name, ','.join(changed_vars)))
+	aa_sub_to_write = []
+	for aa_sub in aa_substs:
+		aa_sub_to_write.append(aa_sub[0]+str(aa_sub[1])+aa_sub[2])
+	out_aa.write("%s\t%s\t%s\n" % (name, ','.join(changed_vars), ','.join(aa_sub_to_write)))
 
 def write_out_aa_bed(header_line, changed_vars, out_aa_bed):
 	'''Creates the proteome.aa.var.bed file, which is basically a collection of the header lines for each entry in proteome.aa.var.bed.dna.'''
@@ -582,7 +585,7 @@ def sort_variants(proteome_file, variant_file):
 			try:
 				changed_vars, aa_substs = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 				if changed_vars != []:
-					write_out_aa(name, changed_vars, out_aa)
+					write_out_aa(name, changed_vars, aa_substs, out_aa)
 					write_out_aa_bed(header_line.split('\t'), changed_vars, out_aa_bed)
 					write_out_aa_bed_dna(header_line.split('\t'), second_header.split(), exon_headers, changed_vars, aa_substs, out_aa_bed_dna)
 			except UnboundLocalError:
@@ -606,7 +609,7 @@ def sort_variants(proteome_file, variant_file):
 	try:
 		changed_vars, aa_substs = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 		if changed_vars != []:
-			write_out_aa(name, changed_vars, out_aa)
+			write_out_aa(name, changed_vars, aa_substs, out_aa)
 			write_out_aa_bed(header_line.split('\t'), changed_vars, out_aa_bed)
 			write_out_aa_bed_dna(header_line.split('\t'), second_header.split(), exon_headers, changed_vars, aa_substs, out_aa_bed_dna)
 	except UnboundLocalError:
@@ -707,6 +710,97 @@ def translate(log_dir):
 	f.close()
 	out_fasta.close()
 
+### These functions are used to make the peptide fasta files.
+
+def trypsinize(sequence):
+	'''Virtually trypsinizes a protein and returns its tryptic peptides'''
+	tryptic_peptides = []
+	seq = ''
+	for letter in sequence:
+		seq += letter
+		if letter == 'K' or letter == 'R':
+			tryptic_peptides.append(seq)
+			seq = ''
+	tryptic_peptides.append(seq)
+	return tryptic_peptides
+
+def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
+	# SUPER UNFINISHED
+	# Right now, just one peptide for each variant.
+	# Tomorrow, write up the different combinations.
+	for var in vars:
+		variant = vars[var]
+		pos = var-peptide_start_pos-1
+		new_pep = peptide[:pos]+variant[1]+peptide[pos+1:]
+		out_file.write('>%s VAR:%s%d%s\n' % (gene, variant[0], var, variant[1]))
+		out_file.write('%s\n' % new_pep)
+
+def assign_variants(gene, tryptic_peptides, variants, out_file):
+	# Get positions and original/changed AAs in a workable format
+	var_set = set(variants) # remove duplicates
+	vars = {}
+	for var in var_set:
+		pos = int(re.findall(r'\d+', var)[0])
+		vars[pos] = var.split(str(pos))
+	total_aas = 0
+	for i in range(len(tryptic_peptides)):
+		peptide = tryptic_peptides[i]
+		vars_in_peptide = [var for var in vars.keys() if total_aas <= var-1 < total_aas+len(peptide)]
+		write_peptides(gene, {v: vars[v] for v in vars_in_peptide}, total_aas, peptide, out_file)
+		total_aas += len(peptide)
+
+def make_peptide_fasta(log_dir):
+	# Grab all of the amino acid variants
+	vars = {}
+	f = open(log_dir+'proteome.bed.aa.var','r')
+	line = f.readline()
+	while line:
+		vars[line.split('\t')[0]] = line.rstrip().split('\t')[-1].split(',')
+		line = f.readline()
+	f.close()
+	
+	f = open(log_dir+'proteome.bed.dna','r')
+	tryp_fasta = open(log_dir+'tryptic_proteome.fasta','w')
+	sequence = ''
+	line = f.readline()
+	while line:
+		# Line type one: First gene header line
+		if line[:3] == 'chr':
+			# Finish processing the previous gene
+			# Using a try/except block here to deal with the possibility of this being the first line
+			# There has to be a more graceful way to do that, right?
+			try:
+				if gene in vars:
+					translated = translate_seq(sequence.upper(), strand) # no variants here yet
+					tryptic_peptides = trypsinize(translated)
+					assign_variants(gene, tryptic_peptides, vars[gene], tryp_fasta)
+			except UnboundLocalError:
+				pass
+			# Start processing the new gene
+			sequence = ''
+			strand = line.split('\t')[5]
+			gene = line.split('\t')[3]
+		# Line type two: Second gene header line
+		elif line[0] == '>':
+			second_header = line # This will be the header in the fasta file
+		# Line type three: Exon line (can be pre-100, post-100 or internal)
+		else:
+			spline = line.rstrip().split('\t')
+			if spline[1] != '-1' and spline[1] != '+1':
+				sequence += spline[-1]
+		line = f.readline()
+	# And finish the last one
+	try:
+		if gene in vars:
+			translated = translate_seq(sequence.upper(), strand) # no variants here yet
+			tryptic_peptides = trypsinize(translated)
+			assign_variants(gene, tryptic_peptides, vars[gene], tryp_fasta)
+	except UnboundLocalError:
+		pass
+		
+	f.close()
+	tryp_fasta.close()
+
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
@@ -795,4 +889,5 @@ if __name__ == "__main__":
 	# Translate the variant sequences into a fasta file.
 	translate(results_folder+"/log/")
 	
-	# Time for tryptic peptides!
+	# Time for tryptic peptides! Remember: C-term (after) K/R residues
+	make_peptide_fasta(results_folder+"/log/")
