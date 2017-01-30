@@ -30,7 +30,7 @@ import warnings
 from exonSearchTree import ExonSearchTree
 from string import maketrans
 import re
-from itertools import chain, combinations
+from itertools import product
 
 # ahhhh look at these hideous global variables
 global logfile
@@ -731,27 +731,44 @@ def trypsinize(sequence):
 	return tryptic_peptides
 
 def get_powerset(vars):
-	'''Gets all combinations of variables in a peptide.'''
-	return chain.from_iterable(combinations(var, n) for n in range(len(var)+1))
+	'''Returns all unique combinations of variants in a peptide.'''
+	
+	# I want to keep consistent positions, so taking things out of the dictionary for now
+	save_varkeys = vars.keys()
+	save_varvals = []
+	for key in save_varkeys:
+		save_varvals.append(vars[key])
+	
+	# Add a blank to each
+	for v in save_varvals:
+		v.append([])
+	
+	# Get the full powerset, including blanks
+	full_powerset = list(product(*save_varvals))
+	
+	variant_sets = []
+	for variant in full_powerset:
+		new_set = []
+		for i in range(len(variant)):
+			if variant[i] != []:
+				new_set.append([save_varkeys[i], variant[i][0], variant[i][1]])
+		if new_set != []:
+			variant_sets.append(new_set)
+	
+	return variant_sets
 
 def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
-	# SUPER UNFINISHED
-	# Right now, just one peptide for each variant.
-	# Tomorrow, write up the different combinations.
-	'''var_combos = get_powerset(vars)
+	'''For each peptide, writes out a copy with all possible combinations of variants.'''
+	var_combos = get_powerset(vars)
 	for var_set in var_combos:
+		new_pep = peptide
+		var_string = []
 		for var in var_set:
-			variant = vars[var]
-			pos = var-peptide_start_pos-1
-			new_pep = peptide[:pos]+variant[1]+peptide[pos+1:]
-	'''
-	for var in vars:
-		variant = vars[var]
-		pos = var-peptide_start_pos-1
-		for v in variant:
-			new_pep = peptide[:pos]+v[1]+peptide[pos+1:]
-			out_file.write('>%s VAR:%s%d%s\n' % (gene, v[0], var, v[1]))
-			out_file.write('%s\n' % new_pep)
+			pos = var[0]-peptide_start_pos-1
+			new_pep = new_pep[:pos]+var[2]+new_pep[pos+1:]
+			var_string.append(var[1]+str(var[0])+var[2])
+		out_file.write('>%s VAR:%s\n' % (gene, ','.join(var_string)))
+		out_file.write('%s\n' % new_pep)
 
 def assign_variants(gene, tryptic_peptides, variants, out_file):
 	'''Figures out which variants belong to each tryptic peptide then calls the function that writes the peptide out to the file'''
