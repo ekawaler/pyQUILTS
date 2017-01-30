@@ -16,7 +16,7 @@ are real unwieldy. Should be able to move various "does this file actually exist
 
 Another definite thing: change all merged_pytest to merged
 
-Instead of doing by protein, maybe do by tryptic peptide? This won't blow up our number of possibilities that much (wait, or will it?), but will functionally do the same thing as keeping every protein configuration. This means the output .fasta will have tryptic peptides instead of full proteins. And in the future, add options for other digestion methods. This will require some clever function creation. You can do it, Emily! It will also require checking for changes in digestion due to AA variants (addition/deletion of K/R). What other complications do I need to watch out for?
+What complications do I need to watch out for when making tryptic peptides? R/K substitutions that lengthen/shorten peptides, short peptides, what happens when two R/K residues are next to each other? Also, a C-term proline will...totally inhibit cutting?
 
 Emily Kawaler
 '''
@@ -719,15 +719,21 @@ def translate(log_dir):
 ### These functions are used to make the peptide fasta files.
 
 def trypsinize(sequence):
-	'''Virtually trypsinizes a protein and returns its tryptic peptides'''
+	'''Virtually trypsinizes a protein and returns its tryptic peptides. Right now, just chops it after any K or R that isn't followed by a P.'''
 	tryptic_peptides = []
 	seq = ''
-	for letter in sequence:
+	for i in range(len(sequence)):
+		letter = sequence[i]
 		seq += letter
-		if letter == 'K' or letter == 'R':
+		try:
+			next_letter = sequence[i+1]
+		except IndexError:
+			next_letter = '*'
+		if (letter == 'K' or letter == 'R') and next_letter != 'P':
 			tryptic_peptides.append(seq)
 			seq = ''
-	tryptic_peptides.append(seq)
+	if seq != '':
+		tryptic_peptides.append(seq)
 	return tryptic_peptides
 
 def get_powerset(vars):
