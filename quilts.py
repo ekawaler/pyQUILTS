@@ -16,7 +16,7 @@ are real unwieldy. Should be able to move various "does this file actually exist
 
 Another definite thing: change all merged_pytest to merged
 
-What complications do I need to watch out for when making tryptic peptides? R/K substitutions that lengthen/shorten peptides, short peptides, what happens when two R/K residues are next to each other? Also, a C-term proline will...totally inhibit cutting?
+Complications to watch out for when defining tryptic peptides: right now we assume the missed cleavages will account for substitutions that add/remove an R/K. Might be worth checking if this actually happens.
 
 Emily Kawaler
 '''
@@ -61,6 +61,7 @@ def parse_input_arguments():
 	parser.add_argument('--threshAN', type=int, default=3)
 	parser.add_argument('--threshN', type=int, default=3)
 	parser.add_argument('--variant_quality_threshold', type=float, default=0.0, help="Quality threshold for variants")
+	parser.add_argument('--no_missed_cleavage', action='store_true', default=False, help="Tryptic peptide fasta by default allows for a single missed cleavage; adding this argument will tell the virtual trypsinizer to assume perfect cleavage")
 	
 	# Pull out the arguments
 	args = parser.parse_args()
@@ -766,6 +767,7 @@ def get_powerset(vars):
 def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
 	'''For each peptide, writes out a copy with all possible combinations of variants.'''
 	var_combos = get_powerset(vars)
+	new_peptides = [[peptide, []]]
 	for var_set in var_combos:
 		new_pep = peptide
 		var_string = []
@@ -773,10 +775,26 @@ def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
 			pos = var[0]-peptide_start_pos-1
 			new_pep = new_pep[:pos]+var[2]+new_pep[pos+1:]
 			var_string.append(var[1]+str(var[0])+var[2])
-		out_file.write('>%s VAR:%s\n' % (gene, ','.join(var_string)))
-		out_file.write('%s\n' % new_pep)
+		if 25 >= len(new_pep) >= 6:
+			out_file.write('>%s START:%d END:%d VAR:%s\n' % (gene, peptide_start_pos, peptide_start_pos+len(new_pep)-1, ','.join(var_string)))
+			out_file.write('%s\n' % new_pep)
+		new_peptides.append([new_pep, var_string])
+	return new_peptides
 
-def assign_variants(gene, tryptic_peptides, variants, out_file):
+def write_missed_cleavage_peptides(gene, prev_peptides, cur_peptides, cur_start_pos, out_file):
+	'''Allows for a single missed cleavage - basically does a Cartesian join between all variants of the previous peptide and all variants of the current peptide (including the case where one, but not both, has no variants)'''
+	if prev_peptides != [] and cur_peptides != []:
+		prev_peptide_start = cur_start_pos-len(prev_peptides[0][0])
+		cur_peptide_end = cur_start_pos+len(cur_peptides[0][0])-1
+		for i in prev_peptides:
+			for j in cur_peptides:
+				if i[1] != [] or j[1] != []:
+					vars = i[1]+j[1]
+					if 25 >= len(i[0]+j[0]) >= 6:
+						out_file.write('>%s START:%d END:%d (missed cleavage after %d) VAR:%s\n' % (gene, prev_peptide_start, cur_peptide_end, cur_start_pos-1, ','.join(vars)))
+						out_file.write('%s\n' % (i[0]+j[0]))
+
+def assign_variants(gene, tryptic_peptides, variants, out_file, no_missed_cleavage):
 	'''Figures out which variants belong to each tryptic peptide then calls the function that writes the peptide out to the file'''
 	# Get positions and original/changed AAs in a workable format
 	var_set = set(variants) # remove duplicates
@@ -788,13 +806,18 @@ def assign_variants(gene, tryptic_peptides, variants, out_file):
 		vars[pos] = tmp
 	# For each tryptic peptide, decide which variants belong and then call a function to write them out
 	total_aas = 0
+	prev_peptides = []
 	for i in range(len(tryptic_peptides)):
 		peptide = tryptic_peptides[i]
 		vars_in_peptide = [var for var in vars.keys() if total_aas <= var-1 < total_aas+len(peptide)]
-		write_peptides(gene, {v: vars[v] for v in vars_in_peptide}, total_aas, peptide, out_file)
+		cur_peptides = write_peptides(gene, {v: vars[v] for v in vars_in_peptide}, total_aas, peptide, out_file)
+		if not no_missed_cleavage:
+			# If we are allowing missed cleavages...
+			write_missed_cleavage_peptides(gene, prev_peptides, cur_peptides, total_aas, out_file)
+		prev_peptides = cur_peptides
 		total_aas += len(peptide)
 
-def make_peptide_fasta(log_dir):
+def make_peptide_fasta(log_dir, no_missed_cleavage):
 	'''Main function for the tryptic peptide fasta file.'''
 	# Grab all of the amino acid variants
 	vars = {}
@@ -819,7 +842,7 @@ def make_peptide_fasta(log_dir):
 				if gene in vars:
 					translated = translate_seq(sequence.upper(), strand) # no variants here yet
 					tryptic_peptides = trypsinize(translated)
-					assign_variants(gene, tryptic_peptides, vars[gene], tryp_fasta)
+					assign_variants(gene, tryptic_peptides, vars[gene], tryp_fasta, no_missed_cleavage)
 			except UnboundLocalError:
 				pass
 			# Start processing the new gene
@@ -840,7 +863,7 @@ def make_peptide_fasta(log_dir):
 		if gene in vars:
 			translated = translate_seq(sequence.upper(), strand) # no variants here yet
 			tryptic_peptides = trypsinize(translated)
-			assign_variants(gene, tryptic_peptides, vars[gene], tryp_fasta)
+			assign_variants(gene, tryptic_peptides, vars[gene], tryp_fasta, no_missed_cleavage)
 	except UnboundLocalError:
 		pass
 		
@@ -936,4 +959,4 @@ if __name__ == "__main__":
 	translate(results_folder+"/log/")
 	
 	# Time for tryptic peptides! Remember: C-term (after) K/R residues
-	make_peptide_fasta(results_folder+"/log/")
+	make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
