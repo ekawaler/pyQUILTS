@@ -476,7 +476,9 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 			continue
 		# If neither the old nor the new codon is a stop codon and the AA changes,
 		# count it!
-		if AA_old != AA_new and AA_new != '*' and AA_old != '*':
+		#if AA_old != AA_new and AA_new != '*' and AA_old != '*':
+		# Now we're just checking whether the old and new AAs are different. Leaving stop codon things in...
+		if AA_old != AA_new:
 			changes.append(var)
 			if reverse_flag:
 				total_AA = len(full_seq)/3
@@ -499,7 +501,9 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 			AA_new = codon_map[triplet_new]
 			#print header_line.split('\t')[3]+'\t'+var+'\t'+str(prev_subst[0])+'\t'+prev_subst[1]+'\t'+triplet_orig+'\t'+triplet_new+'\t'+full_seq[subst_pos-3:subst_pos+6]
 			#print full_seq
-			if AA_old != AA_new and AA_new != '*' and AA_old != '*':
+			#if AA_old != AA_new and AA_new != '*' and AA_old != '*':
+			# Now we're just checking whether the old and new AAs are different. Leaving stop codon things in...
+			if AA_old != AA_new:
 				# G-A2158G:2281.770000
 				change = "X-%s%d%s:0.0" % (triplet_orig, triplet_start, triplet_new)
 				changes.append(change)
@@ -662,11 +666,21 @@ def translate_seq(sequence, strand):
 	#	warnings.warn("Found sequence with length indivisible by 3!")
 	
 	translated = ''
+	
+	'''
 	for i in range(0,len(sequence)-5,3):
-		# Removing the stop codon, I guess.
+		# Translates the whole thing and removes the last character (a stop codon)
+		# Obsolete, since now we can have stop codons ANYWHERE
 		translated += codon_map[sequence[i:i+3]]
-		
 	return translated
+	'''
+	
+	for i in range(0,len(sequence)-2,3):
+		translated += codon_map[sequence[i:i+3]]
+	
+	# Now this should return the translated sequence up to the first stop codon.	
+	# That could either be at the actual end of the sequence, or at a variant that adds a stop.
+	return translated.split('*')[0]
 
 def translate(log_dir):
 	'''Reads in a bed.dna file and translates it to a protein .fasta file.'''
@@ -724,14 +738,20 @@ def translate(log_dir):
 		# Line type three: Exon line (can be pre-100, post-100 or internal)
 		else:
 			spline = line.rstrip().split('\t')
-			if spline[1] != '-1' and spline[1] != '+1':
+			# Basically, if the strand is reversed, we want the -1 part because that'll give us the extra stuff
+			# that gets added in if the stop codon is deleted. But if the strand is forward, we keep the +1 instead.
+			if spline[1] != '+1' and spline[1] != '-1':
+				sequence += spline[-1]
+			elif spline[1] == '-1' and spline[5] == '-':
+				sequence += spline[-1]
+			elif spline[1] == '+1' and spline[5] =='+':
 				sequence += spline[-1]
 		line = f.readline()
 		
 	# And finish the last one
 	try:
 		if prev_gene != gene or AA_subst != prev_AA_subst:
-			translated = translate_seq(sequence, strand)
+			translated = translate_seq(sequence.upper(), strand)
 			out_fasta.write(second_header)
 			out_fasta.write(translated+'\n')
 	except UnboundLocalError:
@@ -988,5 +1008,5 @@ if __name__ == "__main__":
 	write_to_status("Translated")	
 
 	# Time for tryptic peptides! Remember: C-term (after) K/R residues
-	make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
-	write_to_status("Tryptic peptides done. Should be finished.")
+	#make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
+	#write_to_status("Tryptic peptides done. Should be finished.")
