@@ -18,6 +18,10 @@ Another definite thing: change all merged_pytest to merged
 
 Complications to watch out for when defining tryptic peptides: right now we assume the missed cleavages will account for substitutions that add/remove an R/K. Might be worth checking if this actually happens.
 
+Variant Start Codons: Right now, if there's a SNP in the start codon, we just throw that out. At some point, perhaps we should go through and look for the next possible start codon, assuming the transcription will start from there, but honestly, that is probably just going to make a garbage protein, so we're ignoring it for the time being.
+
+Am I ever going to get rid of duplicate tryptic peptides (peptides that show up in multiple proteins)? Maybe that can be a postprocessing step. Or maybe that's a search problem.
+
 Emily Kawaler
 '''
 
@@ -52,9 +56,9 @@ def parse_input_arguments():
 		help="full path to output folder")
 	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20130727", help="full path to folder containing reference proteome")
 	parser.add_argument('--genome', type=str, default="/ifs/data/proteomics/tcga/databases/genome_human", help="full path to folder containing reference genome")
-	# The only one I found that has both somatic and germline
 	parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna/vcf/TCGA-20130502-S", help="VCF file of somatic variants")
 	parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna-germline/vcf/GATK26-G-Nature", help="VCF file of germline variants")
+	#parser.add_argument('--germline', type=str, help="VCF file of germline variants")
 	parser.add_argument('--junction', type=str, help="BED file of splice junctions [currently unsupported]")
 	parser.add_argument('--fusion', type=str, help="Fusion genes [currently unsupported]")
 	parser.add_argument('--threshA', type=int, default=2)
@@ -216,7 +220,11 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 				continue
 
 			# Not sure why we subtract one from pos, but it happened in the original.
+			# Also, if there's no QUAL, will it always be a dot? If not, we need to figure out how to deal
+			# If there's no QUAL and there's a dot, make it just over the threshold.
 			try:
+				if spline[5] == '.':
+					spline[5] = quality_threshold+.01
 				chr, pos, id, old, new_array, qual = spline[0].lstrip('chr'), int(spline[1])-1, spline[2], spline[3], spline[4].split(','), float(spline[5])
 			except ValueError:
 				write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
@@ -411,6 +419,7 @@ def get_variants(vcf_file, proteome_file, type):
 def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 	'''Checks all variants in a gene for whether or not they cause a single-AA non-stop substitution. Returns a list of the ones that do, and the AA substitutions they cause.'''
 	global codon_map
+	global logfile
 	
 	# Ready the translation table for the reverse strand.
 	translate_table = maketrans("ACGTacgt","TGCAtgca")
@@ -427,6 +436,14 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 	
 	changes = []
 	aa_substs = []
+
+	# With hg38, we get a weird thing where some of the genes in proteome.bed.dna have no sequence associated with them.
+	# So...I guess I'll just skip those for now until I figure out why
+	# I think this is fixed, and it was a problem in a different script. Keeping this in anyway, just in case.
+	if '0' in full_seq  or 'N' in full_seq:
+		write_to_log(header_line+full_seq, logfile)
+		return changes, aa_substs
+	
 	prev_start = -1 # Previous codon start position
 	prev_subst = [-1, ''] # Previous substitution position and nucleotide
 	for var in variants:
@@ -451,7 +468,12 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 			triplet_new = triplet_new[::-1].translate(translate_table)
 		AA_old = codon_map[triplet_orig]
 		AA_new = codon_map[triplet_new]
-		#print header_line.split('\t')[3]+'\t'+var+'\t'+triplet_orig+'\t'+triplet_new+'\t'+full_seq[subst_pos-3:subst_pos+6]
+		# If this was a start codon, ignore it for the time being.
+		if AA_old == 'M' and triplet_start == 0:
+			#print "Variant in start codon"
+			#print header_line.split('\t')[3]+'\t'+var+'\t'+triplet_orig+'\t'+triplet_new+'\t'+full_seq[subst_pos-3:subst_pos+6]
+			write_to_log("Start codon variant found: %s" % (header_line.split('\t')[3]+'\t'+var+'\t'+triplet_orig+'\t'+triplet_new+'\t'+full_seq[subst_pos-3:subst_pos+6]),logfile)
+			continue
 		# If neither the old nor the new codon is a stop codon and the AA changes,
 		# count it!
 		if AA_old != AA_new and AA_new != '*' and AA_old != '*':
@@ -461,6 +483,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 				aa_substs.append((AA_old, total_AA-(pos/3), AA_new))
 			else:
 				aa_substs.append((AA_old, pos/3+1, AA_new))
+		# If the new codon is a stop codon, 
 			
 		# Check to see if this is the second substitution in a codon - if so, does the amino acid change with both?
 		if prev_start == triplet_start:
@@ -914,11 +937,13 @@ if __name__ == "__main__":
 	if som_flag and germ_flag:
 		# We can keep going with only one variant file, but if we find neither, we have to quit.
 		raise SystemExit("ERROR: Couldn't find any variant files!\nAborting program.")
+	write_to_status("Merge and qual filter finished")
 		
 	# Now let's remove everything in the somatic file that is duplicated in the germline file
 	# since if it shows up in both, it's a germline variant.
 	if args.somatic and args.germline and not (som_flag or germ_flag):
 		remove_somatic_duplicates(args.germline, args.somatic)
+	write_to_status("Somatic duplicates removed")
 
 	'''# Call read_chr_bed.c, which takes the reference genome and proteome.bed file as input and produces
 	# a fasta file of exomes.
@@ -937,7 +962,8 @@ if __name__ == "__main__":
 		get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "S")
 	if args.germline and not germ_flag:
 		get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "G")
-		
+	write_to_status("Get variants completed, proteome.bed file written")	
+	
 	# Combine them, not very prettily:
 	if args.somatic and args.germline and not (som_flag or germ_flag):
 		dest = open(results_folder+"/log/proteome.bed.var",'w')
@@ -949,14 +975,18 @@ if __name__ == "__main__":
 		shutil.copy(results_folder+"/log/proteome.bed.S.var", results_folder+"/log/proteome.bed.var")
 	elif args.germline and not germ_flag:
 		shutil.copy(results_folder+"/log/proteome.bed.G.var", results_folder+"/log/proteome.bed.var")
-		
+	write_to_status("Somatic and germline combined, proteome.bed.SG or whatever output")
+	
 	# Combine (some more) and sort variants.
 	# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
 	# I will continue to do this, probably? I'll just ignore more later on
 	sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var")
-	
+	write_to_status("Variants sorted")	
+
 	# Translate the variant sequences into a fasta file.
 	translate(results_folder+"/log/")
-	
+	write_to_status("Translated")	
+
 	# Time for tryptic peptides! Remember: C-term (after) K/R residues
 	make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
+	write_to_status("Tryptic peptides done. Should be finished.")
