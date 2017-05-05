@@ -20,7 +20,9 @@ Complications to watch out for when defining tryptic peptides: right now we assu
 
 Variant Start Codons: Right now, if there's a SNP in the start codon, we just throw that out. At some point, perhaps we should go through and look for the next possible start codon, assuming the transcription will start from there, but honestly, that is probably just going to make a garbage protein, so we're ignoring it for the time being.
 
-Am I ever going to get rid of duplicate tryptic peptides (peptides that show up in multiple proteins)? Maybe that can be a postprocessing step. Or maybe that's a search problem.
+Remember at some point to deal with insertions/deletions that change the number of nucleotides, since we currently are not.
+
+Am I ever going to get rid of duplicate tryptic peptides (peptides that show up in multiple proteins)? Maybe that can be a postprocessing step. Or maybe that's a search problem. There aren't very many.
 
 Emily Kawaler
 '''
@@ -818,9 +820,10 @@ def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
 			pos = var[0]-peptide_start_pos-1
 			new_pep = new_pep[:pos]+var[2]+new_pep[pos+1:]
 			var_string.append(var[1]+str(var[0])+var[2])
-		if 25 >= len(new_pep) >= 6:
+		pep_to_write = new_pep.split('*')[0]
+		if 25 >= len(pep_to_write) >= 6:
 			out_file.write('>%s START:%d END:%d VAR:%s\n' % (gene, peptide_start_pos, peptide_start_pos+len(new_pep)-1, ','.join(var_string)))
-			out_file.write('%s\n' % new_pep)
+			out_file.write('%s\n' % pep_to_write)
 		new_peptides.append([new_pep, var_string])
 	return new_peptides
 
@@ -830,12 +833,14 @@ def write_missed_cleavage_peptides(gene, prev_peptides, cur_peptides, cur_start_
 		prev_peptide_start = cur_start_pos-len(prev_peptides[0][0])
 		cur_peptide_end = cur_start_pos+len(cur_peptides[0][0])-1
 		for i in prev_peptides:
-			for j in cur_peptides:
-				if i[1] != [] or j[1] != []:
-					vars = i[1]+j[1]
-					if 25 >= len(i[0]+j[0]) >= 6:
-						out_file.write('>%s START:%d END:%d (missed cleavage after %d) VAR:%s\n' % (gene, prev_peptide_start, cur_peptide_end, cur_start_pos-1, ','.join(vars)))
-						out_file.write('%s\n' % (i[0]+j[0]))
+			if '*' not in i[0]:
+				for j in cur_peptides:
+					if i[1] != [] or j[1] != []:
+						vars = i[1]+j[1]
+						pep_to_write = (i[0]+j[0]).split('*')[0]
+						if 25 >= len(pep_to_write) >= 6:
+							out_file.write('>%s START:%d END:%d (missed cleavage after %d) VAR:%s\n' % (gene, prev_peptide_start, cur_peptide_end, cur_start_pos-1, ','.join(vars)))
+							out_file.write('%s\n' % pep_to_write)
 
 def assign_variants(gene, tryptic_peptides, variants, out_file, no_missed_cleavage):
 	'''Figures out which variants belong to each tryptic peptide then calls the function that writes the peptide out to the file'''
@@ -850,9 +855,16 @@ def assign_variants(gene, tryptic_peptides, variants, out_file, no_missed_cleava
 	# For each tryptic peptide, decide which variants belong and then call a function to write them out
 	total_aas = 0
 	prev_peptides = []
-	for i in range(len(tryptic_peptides)):
+	all_tryp_peptides = set([]) # Wait, do I actually use this? See if there are actually any duplicates, might not be necessary
+	# The last one is an extra peptide in case the stop codon gets erased.
+	for i in range(len(tryptic_peptides)-1):
 		peptide = tryptic_peptides[i]
 		vars_in_peptide = [var for var in vars.keys() if total_aas <= var-1 < total_aas+len(peptide)]
+		# Make sure to get the stop codon if that's a variant, and add the next chunk onto the peptide to be written out if the stop codon gets erased
+		for var in vars.keys():
+			if vars[var][0][0] == '*' and var-1==total_aas+len(peptide):
+				vars_in_peptide.append(var)
+				peptide += '*'+tryptic_peptides[i+1]
 		cur_peptides = write_peptides(gene, {v: vars[v] for v in vars_in_peptide}, total_aas, peptide, out_file)
 		if not no_missed_cleavage:
 			# If we are allowing missed cleavages...
@@ -874,6 +886,7 @@ def make_peptide_fasta(log_dir, no_missed_cleavage):
 	f = open(log_dir+'proteome.bed.dna','r')
 	tryp_fasta = open(log_dir+'tryptic_proteome.fasta','w')
 	sequence = ''
+	extra_seq = ''
 	line = f.readline()
 	while line:
 		# Line type one: First gene header line
@@ -885,11 +898,16 @@ def make_peptide_fasta(log_dir, no_missed_cleavage):
 				if gene in vars:
 					translated = translate_seq(sequence.upper(), strand) # no variants here yet
 					tryptic_peptides = trypsinize(translated)
+					tryp_tran_extra = trypsinize(translate_seq(extra_seq.upper(), strand))
+					if len(tryp_tran_extra) == 0:
+						tryp_tran_extra = ['*']
+					tryptic_peptides.append(tryp_tran_extra[0]) # add one extra peptide in case the last stop codon gets erased
 					assign_variants(gene, tryptic_peptides, vars[gene], tryp_fasta, no_missed_cleavage)
 			except UnboundLocalError:
 				pass
 			# Start processing the new gene
 			sequence = ''
+			extra_seq = ''
 			strand = line.split('\t')[5]
 			gene = line.split('\t')[3]
 		# Line type two: Second gene header line
@@ -900,12 +918,20 @@ def make_peptide_fasta(log_dir, no_missed_cleavage):
 			spline = line.rstrip().split('\t')
 			if spline[1] != '-1' and spline[1] != '+1':
 				sequence += spline[-1]
+			elif spline[1] == '-1' and spline[5] == '-':
+				extra_seq = spline[-1]
+			elif spline[1] == '+1' and spline[5] =='+':
+				extra_seq = spline[-1]
 		line = f.readline()
 	# And finish the last one
 	try:
 		if gene in vars:
 			translated = translate_seq(sequence.upper(), strand) # no variants here yet
 			tryptic_peptides = trypsinize(translated)
+			tryp_tran_extra = trypsinize(translate_seq(extra_seq.upper(), strand))
+			if len(tryp_tran_extra) == 0:
+				tryp_tran_extra = ['*']
+			tryptic_peptides.append(tryp_tran_extra[0]) # add one extra peptide in case the last stop codon gets erased
 			assign_variants(gene, tryptic_peptides, vars[gene], tryp_fasta, no_missed_cleavage)
 	except UnboundLocalError:
 		pass
@@ -1008,5 +1034,5 @@ if __name__ == "__main__":
 	write_to_status("Translated")	
 
 	# Time for tryptic peptides! Remember: C-term (after) K/R residues
-	#make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
-	#write_to_status("Tryptic peptides done. Should be finished.")
+	make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
+	write_to_status("Tryptic peptides done. Should be finished.")
