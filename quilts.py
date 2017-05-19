@@ -805,7 +805,14 @@ def get_powerset(vars):
 			if variant[i] != []:
 				new_set.append([save_varkeys[i], variant[i][0], variant[i][1]])
 		if new_set != []:
-			variant_sets.append(new_set)
+			new_set = sorted(new_set, key=lambda x: x[0])
+			# May or may not work, haven't tested yet
+			repeat_flag = False
+			for i in range(len(new_set)):
+				if new_set[i][2] == '*' and i != len(new_set)-1:
+					repeat_flag = True
+			if not repeat_flag:		
+				variant_sets.append(new_set)
 	
 	return variant_sets
 
