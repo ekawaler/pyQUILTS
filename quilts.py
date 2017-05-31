@@ -58,10 +58,12 @@ def parse_input_arguments():
 		help="full path to output folder")
 	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20130727", help="full path to folder containing reference proteome")
 	parser.add_argument('--genome', type=str, default="/ifs/data/proteomics/tcga/databases/genome_human", help="full path to folder containing reference genome")
-	parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna/vcf/TCGA-20130502-S", help="VCF file of somatic variants")
-	parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna-germline/vcf/GATK26-G-Nature", help="VCF file of germline variants")
-	#parser.add_argument('--germline', type=str, help="VCF file of germline variants")
-	parser.add_argument('--junction', type=str, help="BED file of splice junctions [currently unsupported]")
+	#parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna/vcf/TCGA-20130502-S", help="VCF file of somatic variants")
+	#parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna-germline/vcf/GATK26-G-Nature", help="VCF file of germline variants")
+	#parser.add_argument('--junction', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/rna/tophat/junction_tophat208bowtie2_gMx", help="BED file of splice junctions [in progress]")
+	parser.add_argument('--germline',type=str)
+	parser.add_argument('--somatic',type=str)
+	parser.add_argument('--junction', type=str)
 	parser.add_argument('--fusion', type=str, help="Fusion genes [currently unsupported]")
 	parser.add_argument('--threshA', type=int, default=2)
 	parser.add_argument('--threshAN', type=int, default=3)
@@ -71,10 +73,10 @@ def parse_input_arguments():
 	
 	# Pull out the arguments
 	args = parser.parse_args()
-	# Check that we have a somatic and/or germline file. Abort if not.
-	# Will add junction/fusion to this check later.
-	if not args.somatic and not args.germline:
-		raise SystemExit("ERROR: Must have at least one variant file (somatic and/or germline).\nAborting program.")
+	# Check that we have a somatic and/or germline and/or junction file. Abort if not.
+	# Will add fusion to this check later.
+	if not args.somatic and not args.germline and not args.junction:
+		raise SystemExit("ERROR: Must have at least one variant file (somatic, germline, and/or junctions).\nAborting program.")
 	
 	return args
 
@@ -946,6 +948,30 @@ def make_peptide_fasta(log_dir, no_missed_cleavage):
 	f.close()
 	tryp_fasta.close()
 
+### These functions are used to merge junction files.
+
+def pull_junc_files(junc_dir):
+	'''Finds all *junctions.bed files in the directory.'''
+	files = os.listdir(junc_dir)
+	junc_files = []
+	for f in files:
+		if f.endswith('junctions.bed'):
+			junc_files.append(f)
+	return junc_files
+
+def merge_junction_files(junc_dir, log_dir):
+	'''Merges junction files found in junc_dir.'''
+	
+	# Tries to pull a list of junction files. Returns with a warning if unable to find any.
+	if not os.path.isdir(junc_dir):
+		# No junction files are going to be found. Gotta leave the function.
+		warnings.warn("Unable to open junction folder %s. Giving up on finding splice junctions." % junc_dir)
+		return 1
+	junc_files = pull_junc_files(junc_dir)
+	if len(junc_files) == 0:
+		warnings.warn("Unable to find any *junctions.bed files in %s." % junc_dir)
+		return 1
+
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
@@ -969,6 +995,10 @@ def raise_warning(warn_message):
 	my_warning = warnings.warn(warn_message)
 	print my_warning
 	
+def quit_if_no_variant_files(args):
+	if not (args.germline or args.somatic or args.junction or args.fusion):
+		raise SystemExit("ERROR: Couldn't find any variant files!\nAborting program.")
+
 # Main function!
 if __name__ == "__main__":
 	# Parse input, make sure we have at least one variant file.
@@ -985,16 +1015,18 @@ if __name__ == "__main__":
 	# Time to merge and quality-threshold the variant files!
 	if args.somatic:
 		som_flag = merge_and_qual_filter(args.somatic, args.variant_quality_threshold)
+		if som_flag:
+			args.somatic = None
 	if args.germline:
 		germ_flag = merge_and_qual_filter(args.germline, args.variant_quality_threshold)
-	if som_flag and germ_flag:
-		# We can keep going with only one variant file, but if we find neither, we have to quit.
-		raise SystemExit("ERROR: Couldn't find any variant files!\nAborting program.")
+		if germ_flag:
+			args.germline = None
+	quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
 	write_to_status("Merge and qual filter finished")
 		
 	# Now let's remove everything in the somatic file that is duplicated in the germline file
 	# since if it shows up in both, it's a germline variant.
-	if args.somatic and args.germline and not (som_flag or germ_flag):
+	if args.somatic and args.germline:
 		remove_somatic_duplicates(args.germline, args.somatic)
 	write_to_status("Somatic duplicates removed")
 
@@ -1011,35 +1043,51 @@ if __name__ == "__main__":
 	
 	# Next, create a proteome.bed file containing only variants...probably.
 	# I could probably combine them more prettily, but for now I'll just concatenate the files.
-	if args.somatic and not som_flag:
+	if args.somatic:
 		get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "S")
-	if args.germline and not germ_flag:
+	if args.germline:
 		get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/proteome.bed", "G")
 	write_to_status("Get variants completed, proteome.bed file written")	
 	
 	# Combine them, not very prettily:
-	if args.somatic and args.germline and not (som_flag or germ_flag):
+	if args.somatic and args.germline:
 		dest = open(results_folder+"/log/proteome.bed.var",'w')
 		for f in [results_folder+"/log/proteome.bed.S.var",results_folder+"/log/proteome.bed.G.var"]:
 			with open(f,'r') as src:
 				shutil.copyfileobj(src, dest)
 		dest.close()
-	elif args.somatic and not som_flag:
+	elif args.somatic:
 		shutil.copy(results_folder+"/log/proteome.bed.S.var", results_folder+"/log/proteome.bed.var")
-	elif args.germline and not germ_flag:
+	elif args.germline:
 		shutil.copy(results_folder+"/log/proteome.bed.G.var", results_folder+"/log/proteome.bed.var")
 	write_to_status("Somatic and germline combined, proteome.bed.SG or whatever output")
+
+	# Finish out the variants, if there are any	
+	if args.somatic or args.germline:
+		# Combine (some more) and sort variants.
+		# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
+		# I will continue to do this, probably? I'll just ignore more later on
+		sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var")
+		write_to_status("Variants sorted")	
+
+		# Translate the variant sequences into a fasta file.
+		translate(results_folder+"/log/")
+		write_to_status("Translated")	
+
+		# Time for tryptic peptides! Remember: C-term (after) K/R residues
+		make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
+		write_to_status("Tryptic peptides done. Should be finished.")
 	
-	# Combine (some more) and sort variants.
-	# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
-	# I will continue to do this, probably? I'll just ignore more later on
-	sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var")
-	write_to_status("Variants sorted")	
-
-	# Translate the variant sequences into a fasta file.
-	translate(results_folder+"/log/")
-	write_to_status("Translated")	
-
-	# Time for tryptic peptides! Remember: C-term (after) K/R residues
-	make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
-	write_to_status("Tryptic peptides done. Should be finished.")
+	# Let's move on to alternate splice junctions.
+	if args.junction:
+		write_to_status("Starting on junctions now.")
+		# Merge junction files found in junction folder.
+		junc_flag = merge_junction_files(args.junction, results_folder+'/log')
+		if junc_flag:
+			args.junction = None
+		quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
+		# merge_junctions_bed_dir.pl "$junction" "$result_dir/log/"
+		# filter_known_transcripts.pl "$result_dir/log/merged-junctions.bed" "$db/transcriptome.bed"
+		# filter_A.pl "$result_dir/log/merged-junctions.filter.bed" "$db/proteome.bed" 0 $threshold_A $threshold_AN $threshold_N
+		# read_chr_bed "$result_dir/log/merged-junctions.filter.bed.A.bed"
+		
