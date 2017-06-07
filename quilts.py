@@ -960,7 +960,14 @@ def pull_junc_files(junc_dir):
 	return junc_files
 
 def merge_junction_files(junc_dir, log_dir):
-	'''Merges junction files found in junc_dir.'''
+	'''Merges junction files found in junc_dir. I'm not totally sure why the numbers are changed the way they are, but it appears to give the correct output. Returns 1 if unable to open any junction files or nothing if it runs to completion.'''
+	
+	# May or may not allow this to change. Not a thousand percent sure what it is.
+	min_length = 8
+	min_sum_length = 45
+	
+	num_observ_map = {}
+	junction_map = {} # Is never used.
 	
 	# Tries to pull a list of junction files. Returns with a warning if unable to find any.
 	if not os.path.isdir(junc_dir):
@@ -971,6 +978,149 @@ def merge_junction_files(junc_dir, log_dir):
 	if len(junc_files) == 0:
 		warnings.warn("Unable to find any *junctions.bed files in %s." % junc_dir)
 		return 1
+	
+	for file in junc_files:
+		label = ''
+		if '-' in file:
+			label = '-'+file.split('-')[0]
+			
+		f = open(junc_dir+'/'+file,'r')
+		for line in f.readlines():
+			spline = line.split()
+			if len(spline) > 11:
+				chrm, begin_ex_1, end_ex_2, junc_num, num_observ, len_exons, begin_exons = spline[0], int(spline[1]), int(spline[2]), spline[3], int(spline[4]), spline[10], spline[11]
+				splen_exons = map(int,len_exons.split(','))
+				spbegin_exons = map(int,begin_exons.split(','))
+				begin_intron = begin_ex_1 + splen_exons[0] + 1
+				end_intron = begin_ex_1 + spbegin_exons[-1] -1
+				if 'chr' not in chrm:
+					chrm = 'chr'+chrm
+				if splen_exons[0] >= min_length and splen_exons[1] >= min_length and sum(splen_exons) >= min_sum_length:
+					key = '%s#%d#%d' % (chrm,begin_intron,end_intron)
+					# Why are these two (adding an int and appending to a list) so different? It's hideous. But this is as efficient as I can get with it right now.
+					num_observ_map[key] = num_observ_map.get(key,0) + int(num_observ)
+					junction_map.setdefault(key,[]).append(junc_num+label)
+		f.close()
+		
+	# Time to write out our results
+	w = open(log_dir+'/merged-junctions.bed','w')
+	count = 0
+	for key in sorted(num_observ_map.keys()):
+		spkey = key.split('#')
+		chr, beg_int, end_int = spkey[0], int(spkey[1]), int(spkey[2])
+		begin_ex_1 = beg_int-50-1
+		end_ex_2 = end_int+50+1
+		start_ex_2 = end_int+1-begin_ex_1 
+		w.write("%s\t%d\t%d\tj%d\t%d\t+\t%d\t%d\t0\t2\t50,50\t0,%d\n" % (chr,begin_ex_1,end_ex_2,count,num_observ_map[key],begin_ex_1,end_ex_2,start_ex_2))
+		count += 1
+	w.close()
+							
+def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
+	junctions_model = {}
+	count_model_exons = 0
+	count_model_begin = 0
+	count_model_end = 0
+	
+	try:
+		f = open(transcriptome_bed,'r')
+	except IOError:
+		raise_warning("Could not find transcriptome file at %s!\n Treating all junctions as novel." % transcriptome_bed)
+	
+	if f:	
+		line_number = 0 # Might never get used
+		for line in f.readlines():
+			spline = line.split('\t')
+			chrm, begin_exon, protein, strand, block_count, block_sizes, block_starts = spline[0], int(spline[1]), spline[3], spline[5], int(spline[9]), spline[10], spline[11]
+			sizes = map(int, block_sizes.split(','))
+			starts = map(int, block_starts.split(','))
+			start = begin_exon
+			for i in range(0,block_count-1):
+				begin_intron = start+sizes[i]+1
+				end_intron = begin_exon+starts[i+1]-1
+				key = "%s#%d#%d" % (chrm, begin_intron, end_intron)
+				junctions_model[key] = "C"
+				if i==0:
+					key = "%s#%d" % (chrm, begin_intron)
+					if strand == '+':
+						junctions_model[key] = "B"
+						count_model_begin += 1
+					else:
+						junctions_model[key] = "E"
+						count_model_end += 1
+				if i==block_count-1-1:
+					key = "%s#%d" % (chrm, end_intron)
+					if strand == '-':
+						junctions_model[key] = "B"
+						count_model_begin += 1
+					else:
+						junctions_model[key] = "E"
+						count_model_end += 1
+				start = begin_exon + starts[i+1]
+				count_model_exons += 1
+			line_number += 1
+		f.close()
+	
+	f = open(results_folder+'/merged-junctions.bed','r')
+	w = open(results_folder+'/merged-junctions.filter.bed','w')
+	num_observ_max = 0 # number of maximum observations for a particular intron in RNAseq data
+	count_junct_map = {'B': 0, 'E': 0, 'C': 0, '': 0}
+	count_junctions = 0
+	stat = {}
+	
+	for line in f.readlines():
+		spline = line.split()
+		if len(spline) > 11:
+			chrm, begin_ex_1, end_ex_2, junc_num, num_observ, len_exons, begin_exons = spline[0], int(spline[1]), int(spline[2]), spline[3], int(spline[4]), spline[10], spline[11]
+			splen_exons = map(int,len_exons.split(','))
+			spbegin_exons = map(int,begin_exons.split(','))
+			non_matches = 0
+			junction_status = ''
+			num_observ_max = max(num_observ, num_observ_max)
+			if num_observ >= 1:	
+				begin_intron = begin_ex_1 + splen_exons[0]+1
+				end_intron = begin_ex_1 + spbegin_exons[-1]-1
+				length_intron = end_intron-begin_intron
+				# Figure out whether it already exists in the database and what type it is
+				if "%s#%d#%d" % (chrm, begin_intron, end_intron) in junctions_model.keys():
+					junction_status = 'C'
+				elif "%s#%d" % (chrm, begin_intron) in junctions_model.keys():
+					if junction_status == '':
+						junction_status = junctions_model["%s#%d" % (chrm, begin_intron)]
+					else:
+						if "%s#%d" % (chrm, end_intron) in junctions_model.keys():
+							if junction_status == '':
+								junction_status = junctions_model["%s#%d" % (chrm, end_intron)]
+				# Log it
+				if junction_status == '':
+					w.write(line)
+				else:
+					key = "%s#%d" % (junction_status, num_observ)
+					stat[key] = stat.get(key,0) + 1
+					count_junct_map[junction_status] += 1
+				count_junctions += 1
+	f.close()
+	w.close()
+	
+	# Write out a stats file 
+	w = open(results_folder+'/merged-junctions.filter.stats.txt','w')
+	w.write("num_observ\tC_matches\tB_matches\tE_matches\n")
+	for i in range(1,num_observ_max+1):
+		w.write(str(i))
+		for type in ['C','B','E','']:
+			key = '%s#%d' % (type, i)
+			if key not in stat.keys():
+				stat[key] = 0
+			w.write('\t%d' % (stat[key]))
+		w.write('\n')
+	w.close()
+	
+	write_to_log("\n---Transcript Filtering Results---\n",logfile)
+	write_to_log("Model exons: %d\n" % count_model_exons, logfile)
+	write_to_log("Model transcript begin: %d\n" % count_model_begin, logfile)
+	write_to_log("Model transcript end: %d\n" % count_model_end, logfile)
+	write_to_log("Total RNA-Seq introns: %d\n" % count_junctions, logfile)
+	for type in ['C','B','E','']:
+		write_to_log("RNA-Seq introns %s: %d\n" % (type, count_junct_map[type]), logfile)
 
 ### These functions are used everywhere.
 
@@ -1086,6 +1236,7 @@ if __name__ == "__main__":
 		if junc_flag:
 			args.junction = None
 		quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
+		filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)
 		# merge_junctions_bed_dir.pl "$junction" "$result_dir/log/"
 		# filter_known_transcripts.pl "$result_dir/log/merged-junctions.bed" "$db/transcriptome.bed"
 		# filter_A.pl "$result_dir/log/merged-junctions.filter.bed" "$db/proteome.bed" 0 $threshold_A $threshold_AN $threshold_N
