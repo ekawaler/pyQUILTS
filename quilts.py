@@ -830,7 +830,8 @@ def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
 			new_pep = new_pep[:pos]+var[2]+new_pep[pos+1:]
 			var_string.append(var[1]+str(var[0])+var[2])
 		pep_to_write = new_pep.split('*')[0]
-		if 25 >= len(pep_to_write) >= 6:
+		# Letting there be a missed cleavage just in case the variant changes the cleaving.
+		if 25 >= len(pep_to_write) >= 6 and len(trypsinize(pep_to_write)) <= 2:
 			out_file.write('>%s START:%d END:%d VAR:%s\n' % (gene, peptide_start_pos, peptide_start_pos+len(new_pep)-1, ','.join(var_string)))
 			out_file.write('%s\n' % pep_to_write)
 		new_peptides.append([new_pep, var_string])
@@ -842,12 +843,13 @@ def write_missed_cleavage_peptides(gene, prev_peptides, cur_peptides, cur_start_
 		prev_peptide_start = cur_start_pos-len(prev_peptides[0][0])
 		cur_peptide_end = cur_start_pos+len(cur_peptides[0][0])-1
 		for i in prev_peptides:
+			# Make sure we don't get two missed cleavages due to an added R/K variant by trypsinizing again.
 			if '*' not in i[0]:
 				for j in cur_peptides:
 					if i[1] != [] or j[1] != []:
 						vars = i[1]+j[1]
 						pep_to_write = (i[0]+j[0]).split('*')[0]
-						if 25 >= len(pep_to_write) >= 6:
+						if 25 >= len(pep_to_write) >= 6 and len(trypsinize(pep_to_write)) <=2 :
 							out_file.write('>%s START:%d END:%d (missed cleavage after %d) VAR:%s\n' % (gene, prev_peptide_start, cur_peptide_end, cur_start_pos-1, ','.join(vars)))
 							out_file.write('%s\n' % pep_to_write)
 
@@ -864,7 +866,6 @@ def assign_variants(gene, tryptic_peptides, variants, out_file, no_missed_cleava
 	# For each tryptic peptide, decide which variants belong and then call a function to write them out
 	total_aas = 0
 	prev_peptides = []
-	all_tryp_peptides = set([]) # Wait, do I actually use this? See if there are actually any duplicates, might not be necessary
 	# The last one is an extra peptide in case the stop codon gets erased.
 	for i in range(len(tryptic_peptides)-1):
 		peptide = tryptic_peptides[i]
@@ -1120,7 +1121,7 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 	write_to_log("Model transcript end: %d\n" % count_model_end, logfile)
 	write_to_log("Total RNA-Seq introns: %d\n" % count_junctions, logfile)
 	for type in ['C','B','E','']:
-		write_to_log("RNA-Seq introns %s: %d\n" % (type, count_junct_map[type]), logfile)
+		write_to_log("RNA-Seq introns \"%s\": %d\n" % (type, count_junct_map[type]), logfile)
 
 ### These functions are used everywhere.
 
