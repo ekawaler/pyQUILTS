@@ -29,6 +29,7 @@ Emily Kawaler
 
 import argparse
 import os
+import sys
 import shutil
 from datetime import datetime
 from subprocess import call, check_call, CalledProcessError
@@ -961,7 +962,7 @@ def pull_junc_files(junc_dir):
 	return junc_files
 
 def merge_junction_files(junc_dir, log_dir):
-	'''Merges junction files found in junc_dir. I'm not totally sure why the numbers are changed the way they are, but it appears to give the correct output. Returns 1 if unable to open any junction files or nothing if it runs to completion.'''
+	'''Merges junction files found in junc_dir. Returns 1 if unable to open any junction files or nothing if it runs to completion.'''
 	
 	# May or may not allow this to change. Not a thousand percent sure what it is.
 	min_length = 8
@@ -1017,6 +1018,8 @@ def merge_junction_files(junc_dir, log_dir):
 	w.close()
 							
 def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
+ 	'''Filters out spliceform transcripts that are known from those that aren't, and annotates the ones that can be annotated. Haven't done any serious testing on this yet, so...yeah, use at yr own risk'''
+
 	junctions_model = {}
 	count_model_exons = 0
 	count_model_begin = 0
@@ -1035,6 +1038,7 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 			sizes = map(int, block_sizes.split(','))
 			starts = map(int, block_starts.split(','))
 			start = begin_exon
+
 			for i in range(0,block_count-1):
 				begin_intron = start+sizes[i]+1
 				end_intron = begin_exon+starts[i+1]-1
@@ -1087,10 +1091,10 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 				elif "%s#%d" % (chrm, begin_intron) in junctions_model.keys():
 					if junction_status == '':
 						junction_status = junctions_model["%s#%d" % (chrm, begin_intron)]
-					else:
-						if "%s#%d" % (chrm, end_intron) in junctions_model.keys():
-							if junction_status == '':
-								junction_status = junctions_model["%s#%d" % (chrm, end_intron)]
+				else:
+					if "%s#%d" % (chrm, end_intron) in junctions_model.keys():
+						if junction_status == '':
+							junction_status = junctions_model["%s#%d" % (chrm, end_intron)]
 				# Log it
 				if junction_status == '':
 					w.write(line)
@@ -1115,13 +1119,411 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 		w.write('\n')
 	w.close()
 	
-	write_to_log("\n---Transcript Filtering Results---\n",logfile)
-	write_to_log("Model exons: %d\n" % count_model_exons, logfile)
-	write_to_log("Model transcript begin: %d\n" % count_model_begin, logfile)
-	write_to_log("Model transcript end: %d\n" % count_model_end, logfile)
-	write_to_log("Total RNA-Seq introns: %d\n" % count_junctions, logfile)
+	write_to_log("\n---Transcript Filtering Results---",logfile)
+	write_to_log("Model exons: %d" % count_model_exons, logfile)
+	write_to_log("Model transcript begin: %d" % count_model_begin, logfile)
+	write_to_log("Model transcript end: %d" % count_model_end, logfile)
+	write_to_log("Total RNA-Seq introns: %d" % count_junctions, logfile)
 	for type in ['C','B','E','']:
-		write_to_log("RNA-Seq introns \"%s\": %d\n" % (type, count_junct_map[type]), logfile)
+		write_to_log("RNA-Seq introns \"%s\": %d" % (type, count_junct_map[type]), logfile)
+
+def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
+	# Leaving out "print details", which seems to just write out a file for each protein, which seems...unnecessary and excessive? If it needs to come back it can come back.
+	# And if I do put that back, I need to make sure to find all the points in the original code where it's used (search print_details==1, OUT_DETAILS, should pick them up)
+	
+	### Keeping track of a bunch of things from the proteome.bed file
+	f = open(log_dir+'/proteome.bed','r')
+	
+	models = {} # Stores tuple from proteome.bed for each protein
+	junctions_model = {}
+	junctions_model_A = {}
+	junctions_model_begin_intron = {}
+	junctions_model_end_intron = {}
+	count_model_exons = 0
+	
+	line_number = 0
+	line = f.readline()
+	while line:
+		spline = line.rstrip().split()
+		chr, begin_exon, end_exon, protein, strand, block_count, block_sizes, block_starts = spline[0], int(spline[1]), int(spline[2]), spline[3], spline[5], int(spline[9]), spline[10], spline[11]
+		models[protein] = line
+		sizes = map(int,block_sizes.split(','))
+		starts = map(int,block_starts.split(','))
+		start = begin_exon
+		for i in range(0,block_count-1):
+			begin_intron = start + sizes[i] + 1
+			end_intron = begin_exon + starts[i+1] - 1
+			junctions_model.setdefault("%s#%d#%d" % (chr, begin_intron, end_intron),[]).append("%s,%d,%d" % (protein, i, i+1))
+			junctions_model_begin_intron.setdefault("%s#%d" % (chr, begin_intron),[]).append("%s,%d" % (protein, i))
+			junctions_model_end_intron.setdefault("%s#%d" % (chr, end_intron),[]).append("%s,%d" % (protein, i+1))
+			
+			# Looks to pick alternate blocks for possible weird splicing? is this really the most efficient way to do this? maybe it will make more sense later.
+			for j in range(i+2,block_count):
+				end_intron_tmp = begin_exon + starts[j] - 1
+				junctions_model_A.setdefault("%s#%d#%d" % (chr, begin_intron, end_intron_tmp),[]).append("%s,%d,%d" % (protein, i, j))
+			start = begin_exon + starts[i+1]
+		count_model_exons += block_count # does this belong here? what is this even tracking
+		line_number += 1
+		line = f.readline()
+	
+	f.close()
+
+	### Time to match our putative splice junctions to model introns.
+	### ...and write out a whole ton of files. Are any of these useful?
+	### I'll rename them when I find out what they are. Stop naming things with underscores!
+	f = open(log_dir+'merged-junctions.filter.bed','r')
+	outfile = open(log_dir+'merged-junctions.filter.A.bed','w')
+	outfile_ = open(log_dir+'merged-junctions.filter.A_.bed','w')
+	outfile_AN = open(log_dir+'merged-junctions.filter.AN.bed','w')
+	outfile_AN_ = open(log_dir+'merged-junctions.filter.AN_.bed','w')
+	outfile_NOT = open(log_dir+'merged-junctions.filter.notA.bed','w')
+	outfile_EXTRA = open(log_dir+'merged-junctions.filter.A.extra.bed','w')
+	outfile_EXTRA_ = open(log_dir+'merged-junctions.filter.A.extra_.bed','w')
+	outfile_AN_EXTRA = open(log_dir+'merged-junctions.filter.AN.extra.bed','w')
+	outfile_AN_EXTRA_ = open(log_dir+'merged-junctions.filter.AN.extra_.bed','w')
+	outfile_NOT_EXTRA = open(log_dir+'merged-junctions.filter.notA.extra.bed','w')
+	
+	num_observ_max = 0
+	junction_count = 0
+	count_junctions_map = {}
+	stat_map = {}
+	
+	line = f.readline()
+	while line:
+		spline = line.rstrip().split()
+		chr, begin_ex_1, end_ex_2, junc_num, num_observ, len_exons, begin_exons = spline[0], int(spline[1]), int(spline[2]), spline[3], int(spline[4]), map(int,spline[10].split(',')), map(int,spline[11].split(','))
+		size = [] # Will this get used? I bet it won't
+		non_matches = 0
+		junc_status = ""
+		N = True # This is an indicator for something.
+		num_observ_max = max(num_observ_max, num_observ)
+		if num_observ >= 1: # should always be
+			begin_intron = begin_ex_1 + len_exons[0] + 1
+			end_intron = begin_ex_1 + begin_exons[-1] - 1
+			stop_ex_1 = begin_intron - 1
+			start_ex_2 = end_intron + 1
+			len_intron = end_intron - begin_intron
+			
+			key = "%s#%d#%d" % (chr, begin_intron, end_intron)
+			# This apparently never executes. But why?
+			if key in junctions_model.keys():
+				print "Actually it totally does execute, dorkus %s" % key
+				junc_status = "C"
+				N = False
+			else:
+				# I know these upcoming functions have a lot more parameters than should 
+				# be strictly necessary, but I thought this function was getting lengthy
+				# and I wanted to break it up a bit.
+				if key in junctions_model_A.keys():
+					# If the RNAseq intron matched any of the beginnings/ends of introns
+					# from the gene, new gene created with exons that precede & follow
+					# RNAseq intron. (Conserved exon boundaries? I want to say yes?)
+					N = False
+					junc_status = "A"
+					write_to_log("%s: %s" % (junc_status, key), logfile)
+					gn_name = conserved_exon_boundaries(junctions_model_A[key], models, num_observ, start_ex_2, threshA, outfile, outfile_EXTRA, outfile_, outfile_EXTRA_)
+				else:
+					key = "%s#%d" % (chr, begin_intron)
+					if key in junctions_model_begin_intron.keys():
+						# If only the beginning of the RNAseq intron was matched to 
+						# the existing in-database beginning of the DNA intron, we have
+						# a truncated exon.
+						N = False
+						junc_status = "AN1"
+						write_to_log("%s: %s" % (junc_status, key), logfile)
+						gn_name, outside = truncated_exon(junctions_model_begin_intron[key], models, end_intron, num_observ, start_ex_2, threshAN, outfile_AN, outfile_AN_EXTRA, outfile_AN_, outfile_AN_EXTRA_)
+						if outside:
+							junc_status = ""
+					# Should this next chunk be in another else?
+					key = "%s#%d" % (chr, end_intron)
+					if key in junctions_model_end_intron.keys():
+						# If only the end of the RNAseq intron was matched to 
+						# the existing in-database end of the DNA intron, we have
+						# the elongation of an exon within an intron.
+						N = False
+						junc_status = "AN2"
+						write_to_log("%s: %s" % (junc_status, key), logfile)
+						gn_name, outside = elongated_exon(junctions_model_end_intron[key], models, begin_intron, num_observ, start_ex_2, threshAN, outfile_AN, outfile_AN_EXTRA, outfile_AN_, outfile_AN_EXTRA_)
+						if outside:
+							junc_status = ""
+					if N or gn_name == "NO NAME":
+						# There should be another "or" condition here, I guess, where 
+						# something is returned from elongated/truncated weirdly?
+						# For now I'm just going to keep this one and see what happens.
+						# It all comes out the same.
+						gn_name = "NO_GENE-N-%d-%s-%s-%d-%d" % (num_observ, chr, junc_num, begin_intron, end_intron)
+		
+			new_line = "%s\t%d\t%d\t%s\t%s\n" % (chr, begin_ex_1, end_ex_2, gn_name, '\t'.join(spline[4:]))
+			if junc_status == "":
+				if threshN <= num_observ:
+					outfile_NOT.write(new_line)
+				else:
+					outfile_NOT_EXTRA.write(new_line)
+			else:
+				key = "%s#%d" % (junc_status, num_observ)
+				stat_map[key] = stat_map.get(key,0) + 1
+				count_junctions_map[junc_status] = count_junctions_map.get(junc_status, 0) + 1
+				if junc_status[:2] == "AN":
+					if threshAN <= num_observ:
+						outfile_NOT.write(new_line)
+					else:
+						outfile_NOT_EXTRA.write(new_line)
+			junction_count += 1
+					
+		line = f.readline()
+	
+	f.close()
+	outfile.close()
+	outfile_.close()
+	outfile_AN.close()
+	outfile_AN_.close()
+	outfile_NOT.close()
+	outfile_EXTRA.close()
+	outfile_EXTRA_.close()
+	outfile_AN_EXTRA.close()
+	outfile_AN_EXTRA_.close()
+	outfile_NOT_EXTRA.close()
+	
+	w = open(log_dir+"merged-junctions.filterA.stat.txt",'w')
+	w.write('num_observ\tC_matches\tA_matches\tAN1_matches\tAN2_matches\n')
+	for i in range(1,num_observ_max+1):
+		w.write(str(i))
+		for type in ["C","A","AN1","AN2"]:
+			key = "%s#%d" % (type, i)
+			w.write("\t%d" % stat_map.get(key, 0))
+		w.write("\n")
+	w.close()
+	
+	write_to_log("Model exons: %d\n" % count_model_exons, logfile)
+	write_to_log("RNAseq introns: %d\n" % junction_count, logfile)
+	for type in ["C","A","AN1","AN2"]:
+		write_to_log("%s: %d\n" % (type, count_junctions_map.get(type, 0)), logfile)
+
+def conserved_exon_boundaries(prot_info, models, num_observ, start_exon_2, threshA, out_file, out_extra, out_file_, out_extra_):
+	# If I have a variable with an underscore at the end, that means it's just something I've formatted to be printed later and isn't used in any calculations or anything.
+	for prot in prot_info:
+		sprot = prot.split(',')
+		protein, alt1, alt2 = sprot[0],int(sprot[1]),int(sprot[2])
+		if protein in models:
+			split_prot = models[protein].rstrip().split()
+			chr, start, end, name, block_count, block_sizes, block_starts = split_prot[0], int(split_prot[1]), int(split_prot[2]), split_prot[3], int(split_prot[9]), map(int,split_prot[10].split(',')), map(int,split_prot[11].split(','))
+			start_exon_1 = ""
+			size_exon_1 = ""
+			size_exon_2 = ""
+			removed_length = 0
+			
+			block_count_ = 0
+			block_sizes_ = []
+			block_starts_ = []
+			for i in range(0, block_count):
+				if i <= alt1 or alt2 <= i:
+					block_count_ += 1
+					block_sizes_.append(str(block_sizes[i]))
+					block_starts_.append(str(block_starts[i]))
+				else:
+					removed_length += block_sizes[i]
+				if i == alt1:
+					start_exon_1 = start+block_starts[i] # start location of exon 1 that bridges
+					size_exon_1 = block_sizes[i]
+				if i == alt2:
+					# Do we use this?
+					#stop_exon_2=start+block_starts[i]+block_sizes[i] #the end location of the exon2 that bridges
+					size_exon_2 = block_sizes[i]
+			# Is "chr" the same as "chromosome"? It's just the name, should be fine
+			name_ = "%s-A-%d-%d-%d-%s-%d-%d-%d" % (name, alt1+1, alt2+1, num_observ, chr, start_exon_1+size_exon_1, start_exon_2, removed_length)
+			to_print = "%s\t%d\t%d\t%s\t%d\t%s\t%s\t%s\t0,0,255\t%d\t%s\t%s\n" % (chr, start, end, name_, num_observ, split_prot[5], split_prot[6], split_prot[7], block_count_, ','.join(block_sizes_), ','.join(block_starts_))
+			if removed_length % 3 == 0:
+				if threshA <= num_observ:
+					out_file.write(to_print)
+				else:
+					out_extra.write(to_print)
+			else:
+				if threshA <= num_observ:
+					out_file_.write(to_print)
+				else:
+					out_extra_.write(to_print)
+	try:
+		return name_
+	except UnboundLocalError:
+		return "NO NAME"
+
+def truncated_exon(prot_info, models, end_intron, num_observ, start_exon_2, threshAN, out_an, out_an_extra, out_an_, out_an_extra_):
+	# If I have a variable with an underscore at the end, that means it's just something I've formatted to be printed later and isn't used in any calculations or anything.
+	outside = True
+	for prot in prot_info:
+		sprot = prot.split(',')
+		protein, alt1 = sprot[0], int(sprot[1])
+		if protein in models.keys():
+			split_prot = models[protein].rstrip().split()
+			chr, start, end, name, strand, block_count, block_sizes, block_starts = split_prot[0], int(split_prot[1]), int(split_prot[2]), split_prot[3], split_prot[5], int(split_prot[9]), map(int,split_prot[10].split(',')), map(int,split_prot[11].split(','))
+			start_exon_1 = ""
+			size_exon_1 = ""
+			size_exon_2 = ""
+			
+			if end_intron >= end:
+				# Not within the same gene
+				# I think nothing happens if this occurs.
+				# Move to next protein.
+				print "OH NO %d %d" % (end_intron, end)
+				continue
+			outside = False
+			block_count_ = 0
+			block_sizes_ = []
+			block_starts_ = []
+			modify = True
+			for i in range(0, block_count):
+				# Create new gene from exons that precede the beginning of the RNAseq intron
+				# and the exons that come after the end of the RNAseq intron
+				if i == alt1: 
+					# We're at the right start intron
+					start_exon_1 = start+block_starts[i] # start location of exon 1
+					size_exon_1 = block_sizes[i]
+				if i <= alt1 or start+block_starts[i-1]+block_sizes[i-1] > end_intron:
+					# Add sizes and starts on both sides of the junction
+					# The above is guaranteed to happen if this happens, is that cool?
+					block_count_ += 1
+					block_sizes_.append(str(block_sizes[i]))
+					block_starts_.append(str(block_starts[i]))
+				else:
+					# I don't really know what's going on here, honestly
+					if start+block_starts[i]+block_sizes[i] < end_intron:
+						# If end of RNAseq intron between ends of [i]th & [i+1]th exons,
+						# modifies [i+1] exon. We...don't know why? At least KVR doesn't
+						# and I'll have to think about it.
+						e1 = start+block_starts[i]
+						e2 = start+block_starts[i]+block_sizes[i]
+					else:
+						if modify:
+							i1 = start+block_starts[i]+block_sizes[i]-end_intron # new size
+							i2 = end_intron-start+1 # new start
+							size_exon_2 = i1
+							block_count_ += 1
+							block_sizes_.append(str(i1))
+							block_starts_.append(str(i2))
+							modify = False
+				
+
+			# Is "chr" the same as "chromosome"? Think so. It's just the name, should be fine
+			name_ = "%s-AN1-%d-%d-%s-%d-%d" % (name, alt1+1, num_observ, chr, start_exon_1+size_exon_1, start_exon_2)
+			to_print_beginning = "%s\t%d\t%d\t%s\t%d\t%s\t%s\t%s\t" % (chr, start, end, name_, num_observ, split_prot[5], split_prot[6], split_prot[7])
+			to_print_end = "\t%d\t%s\t%s\n" % (block_count_, ','.join(block_sizes_), ','.join(block_starts_))
+			if modify:
+				# At some point move this to write_to_log if it seems important enough to keep
+				raise_warning("Error: %s\n" % name)
+			else:
+				if strand == '+':
+					to_print = "%s0,100,0%s" % (to_print_beginning, to_print_end)
+					if threshAN <= num_observ:
+						out_an.write(to_print)
+					else:
+						out_an_extra.write(to_print)
+				else:
+					to_print = "%s107,142,35%s" % (to_print_beginning, to_print_end)
+					if threshAN <= num_observ:
+						out_an_.write(to_print)
+					else:
+						out_an_extra_.write(to_print)
+		#else:
+		#	print "%s not in models, format should be %s" % (protein, models.keys()[0])
+	try:
+		return name_, outside
+	except UnboundLocalError:
+		return "NO NAME", outside
+
+def elongated_exon(prot_info, models, begin_intron, num_observ, start_exon_2, threshAN, out_an, out_an_extra, out_an_, out_an_extra_):
+	# If I have a variable with an underscore at the end, that means it's just something I've formatted to be printed later and isn't used in any calculations or anything.
+	outside = True
+	for prot in prot_info:
+		sprot = prot.split(',')
+		protein, alt2 = sprot[0], int(sprot[1])
+		if protein in models.keys():
+			split_prot = models[protein].rstrip().split()
+			chr, start, end, name, strand, block_count, block_sizes, block_starts = split_prot[0], int(split_prot[1]), int(split_prot[2]), split_prot[3], split_prot[5], int(split_prot[9]), map(int,split_prot[10].split(',')), map(int,split_prot[11].split(','))
+			start_exon_1 = ""
+			size_exon_1 = ""
+			size_exon_2 = ""
+			
+			if start >= begin_intron:
+				# Not within the same gene
+				# I think nothing happens if this occurs.
+				# Move to next protein.
+				#outside = False
+				print "OH NO %s %d %d %d" % (protein, alt2, start, begin_intron)
+				continue
+			outside = False
+			block_count_ = 0
+			block_sizes_ = []
+			block_starts_ = []
+			modify = True
+			offset = 0
+			for i in range(0, block_count):
+				# Create new gene from exons that precede the beginning of the RNAseq intron
+				# and the exons that come after the end of the RNAseq intron
+				if i == alt2: 
+					# We're at the right start intron
+					size_exon_2 = block_sizes[i] # end of exon 2
+				if i == 0 and begin_intron < start:
+					# This should never happen, right? since this originally was
+					# inside an if block for start<begin_intron
+					# If beginning of intron is before beginning of gene
+					block_count_ += 1
+					e = block_sizes[i] + 201 # why 201?
+					offset = start-begin_intron+e
+					block_sizes_.append(str(e))
+					block_starts_.append(str(block_starts[i]))
+				else:
+					if i >= alt2 or start+block_starts[i+1]<begin_intron:
+						# Create new gene from exons preceding start of intron and exons
+						# following end of intron
+						block_count_ += 1
+						block_sizes_.append(str(block_sizes[i]))
+						e = block_starts[i] + offset
+						block_starts_.append(str(e))
+					else:
+						if start+block_starts[i] > begin_intron:
+							# If beginning of RNAseq intron between beginnings
+							# of [i]th & [i+1]th exons, modifies [i]th exon.
+							e1 = start + block_starts[i]
+							e2 = start + block_starts[i] + block_sizes[i]
+						else:
+							# What is the point of this? Why not just leave this stuff
+							# where it was?
+							if modify:
+								i1 = begin_intron - (start + block_starts[i])
+								i2 = block_starts[i] # exon start
+								size_exon_1 = i1
+								block_count_ += 1
+								block_sizes_.append(str(i1))
+								block_starts_.append(str(i2))
+								modify = False
+								
+			# Is "chr" the same as "chromosome"? It's just the name, should be fine
+			#name_ = "%s-AN2-%d-%d-%s-%d-%d" % (name, alt2+1, num_observ, chr, int(start_exon_1)+int(size_exon_1), start_exon_2)
+			name_ = "%s-AN2-%d-%d-%s-%d-%d" % (name, alt2+1, num_observ, chr, begin_intron, start_exon_2)
+			to_print_beginning = "%s\t%d\t%d\t%s\t%d\t%s\t%s\t%s\t" % (chr, start-offset, end, name_, num_observ, split_prot[5], split_prot[6], split_prot[7])
+			to_print_end = "\t%d\t%s\t%s\n" % (block_count_, ','.join(block_sizes_), ','.join(block_starts_))
+			if modify:
+				# At some point move this to write_to_log if it seems important enough to keep
+				raise_warning("Error: %s\n" % name)
+			else:
+				if strand == '-':
+					to_print = "%s184,134,11%s" % (to_print_beginning, to_print_end)
+					if threshAN <= num_observ:
+						out_an.write(to_print)
+					else:
+						out_an_extra.write(to_print)
+				else:
+					to_print = "%s255,215,0%s" % (to_print_beginning, to_print_end)
+					if threshAN <= num_observ:
+						out_an_.write(to_print)
+					else:
+						out_an_extra_.write(to_print)
+		#else:
+		#	print "%s not in models, format should be %s" % (protein, models.keys()[0])	
+	try:
+		return name_, outside
+	except UnboundLocalError:
+		return "NO NAME", outside
 
 ### These functions are used everywhere.
 
@@ -1230,6 +1632,7 @@ if __name__ == "__main__":
 		write_to_status("Tryptic peptides done. Should be finished.")
 	
 	# Let's move on to alternate splice junctions.
+	# We're removing some of the earlier parts for now to expedite testing.
 	if args.junction:
 		write_to_status("Starting on junctions now.")
 		# Merge junction files found in junction folder.
@@ -1238,6 +1641,9 @@ if __name__ == "__main__":
 			args.junction = None
 		quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
 		filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)
+		#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
+		filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
+		write_to_status("Filtered alternative splices into the appropriate types.")
 		# merge_junctions_bed_dir.pl "$junction" "$result_dir/log/"
 		# filter_known_transcripts.pl "$result_dir/log/merged-junctions.bed" "$db/transcriptome.bed"
 		# filter_A.pl "$result_dir/log/merged-junctions.filter.bed" "$db/proteome.bed" 0 $threshold_A $threshold_AN $threshold_N
