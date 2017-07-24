@@ -65,6 +65,7 @@ def parse_input_arguments():
 	parser.add_argument('--germline',type=str)
 	parser.add_argument('--somatic',type=str)
 	parser.add_argument('--junction', type=str)
+	parser.add_argument('--mapsplice', action='store_true', default=False, help="Use this if your junctions were created by MapSplice rather than Tophat. Automatically converts the junctions.txt file at the junction location to a file called junctions.bed which can be found by this script.")
 	parser.add_argument('--fusion', type=str, help="Fusion genes [currently unsupported]")
 	parser.add_argument('--threshA', type=int, default=2)
 	parser.add_argument('--threshAN', type=int, default=3)
@@ -1220,7 +1221,7 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 					# RNAseq intron. (Conserved exon boundaries? I want to say yes?)
 					N = False
 					junc_status = "A"
-					write_to_log("%s: %s" % (junc_status, key), logfile)
+					#write_to_log("%s: %s" % (junc_status, key), logfile)
 					gn_name = conserved_exon_boundaries(junctions_model_A[key], models, num_observ, start_ex_2, threshA, outfile, outfile_EXTRA, outfile_, outfile_EXTRA_)
 				else:
 					key = "%s#%d" % (chr, begin_intron)
@@ -1230,7 +1231,7 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 						# a truncated exon.
 						N = False
 						junc_status = "AN1"
-						write_to_log("%s: %s" % (junc_status, key), logfile)
+						#write_to_log("%s: %s" % (junc_status, key), logfile)
 						gn_name, outside = truncated_exon(junctions_model_begin_intron[key], models, end_intron, num_observ, start_ex_2, threshAN, outfile_AN, outfile_AN_EXTRA, outfile_AN_, outfile_AN_EXTRA_)
 						if outside:
 							junc_status = ""
@@ -1242,7 +1243,7 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 						# the elongation of an exon within an intron.
 						N = False
 						junc_status = "AN2"
-						write_to_log("%s: %s" % (junc_status, key), logfile)
+						#write_to_log("%s: %s" % (junc_status, key), logfile)
 						gn_name, outside = elongated_exon(junctions_model_end_intron[key], models, begin_intron, num_observ, start_ex_2, threshAN, outfile_AN, outfile_AN_EXTRA, outfile_AN_, outfile_AN_EXTRA_)
 						if outside:
 							junc_status = ""
@@ -1635,13 +1636,21 @@ if __name__ == "__main__":
 	# We're removing some of the earlier parts for now to expedite testing.
 	if args.junction:
 		write_to_status("Starting on junctions now.")
+		# If MapSplice was used instead of Tophat, copy its junctions.txt file to 
+		# junctions.bed so the merge_junction_files function will pick up on it
+		if args.mapsplice:
+			try:
+				shutil.copy(args.junction+'/junctions.txt', args.junction+'/junctions.bed')
+			except IOError:
+				write_to_log("Could not copy junctions.txt to junctions.bed - check MapSplice junction file location", logfile)
+				warnings.warn("Could not copy %s/junctions.txt to junctions.bed - check MapSplice junction file location. Skipping..." % args.junction)
 		# Merge junction files found in junction folder.
-		junc_flag = merge_junction_files(args.junction, results_folder+'/log')
+		'''junc_flag = merge_junction_files(args.junction, results_folder+'/log')
 		if junc_flag:
 			args.junction = None
 		quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
-		filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)
-		#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
+		filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)'''
+		shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
 		filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
 		write_to_status("Filtered alternative splices into the appropriate types.")
 		# merge_junctions_bed_dir.pl "$junction" "$result_dir/log/"
