@@ -82,7 +82,7 @@ def parse_input_arguments():
 	
 	return args
 
-def set_up_output_dir(output_dir, ref_proteome):
+def set_up_output_dir(output_dir, args):
 	''' Sets up the results folder (creates it, sets up a log file and status file).
 		Because this will probably confuse people (me) later, "output directory" refers
 		to the directory the user specifies in which the "results folder" will reside. The
@@ -127,22 +127,32 @@ def set_up_output_dir(output_dir, ref_proteome):
 	
 	# Moves reference proteome to the working area.
 	try:
-		shutil.copy(ref_proteome+"/proteome.fasta",results_folder+"/fasta/parts/"+ref_proteome.split("/")[-1]+".fasta")
+		shutil.copy(args.proteome+"/proteome.fasta",results_folder+"/fasta/parts/"+args.proteome.split("/")[-1]+".fasta")
 	except IOError:
-		raise SystemExit("ERROR: Reference proteome .fasta file not found at "+ref_proteome+"/proteome.fasta.\nAborting program.")	
+		raise SystemExit("ERROR: Reference proteome .fasta file not found at "+args.proteome+"/proteome.fasta.\nAborting program.")	
 	try:
-		shutil.copy(ref_proteome+"/proteome.bed",results_folder+"/log/")
+		shutil.copy(args.proteome+"/proteome.bed",results_folder+"/log/")
 	except IOError:
-		raise SystemExit("ERROR: Reference proteome .bed file not found at "+ref_proteome+"/proteome.bed.\nAborting program.")
-	# Not sure if these two should be quite so important.
-	try:
-		shutil.copy(ref_proteome+"/proteome-descriptions.txt",results_folder+"/log/")
-	except IOError:
-		raise SystemExit("ERROR: Reference proteome gene descriptions file not found at "+ref_proteome+"/proteome-descriptions.txt.\nAborting program.")
-	try:
-		shutil.copy(ref_proteome+"/proteome-genes.txt",results_folder+"/log/")
-	except IOError:
-		raise SystemExit("ERROR: Reference proteome gene names file not found at "+ref_proteome+"/proteome-genes.txt.\nAborting program.")
+		raise SystemExit("ERROR: Reference proteome .bed file not found at "+args.proteome+"/proteome.bed.\nAborting program.")
+	# Not sure if these four should be quite so important.
+	if args.somatic or args.germline:
+		try:
+			shutil.copy(args.proteome+"/proteome-descriptions.txt",results_folder+"/log/")
+		except IOError:
+			raise SystemExit("ERROR: Reference proteome gene descriptions file not found at "+args.proteome+"/proteome-descriptions.txt.\nAborting program.")
+		try:
+			shutil.copy(args.proteome+"/proteome-genes.txt",results_folder+"/log/")
+		except IOError:
+			raise SystemExit("ERROR: Reference proteome gene names file not found at "+args.proteome+"/proteome-genes.txt.\nAborting program.")
+	if args.junction:
+		try:
+			shutil.copy(args.proteome+"/proteome-descriptions.txt",results_folder+"/log/alternative-descriptions.txt")
+		except IOError:
+			raise SystemExit("ERROR: Reference proteome gene descriptions file not found at "+args.proteome+"/proteome-descriptions.txt.\nAborting program.")
+		try:
+			shutil.copy(args.proteome+"/proteome-genes.txt",results_folder+"/log/alternative-genes.txt")
+		except IOError:
+			raise SystemExit("ERROR: Reference proteome gene names file not found at "+args.proteome+"/proteome-genes.txt.\nAborting program.")
 	
 	return results_folder
 
@@ -216,6 +226,13 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 			if len(spline) < 6:
 				# Bummer, we don't have six tab-separated fields, this isn't a valid VCF line
 				write_to_log("Error parsing: "+line, vcf_log_location)
+				line = f.readline()
+				continue
+			if spline[4] == '.':
+				# It's a "no variant". Ignore it.
+				# This hasn't been tested too rigorously because it didn't appear in any of my test data,
+				# but someone else had some of these so I had him insert this and it seemed to work for him.
+				#write_to_log("No variant: "+line, vcf_log_location) # Uncomment this if you want to write these lines to the log for testing
 				line = f.readline()
 				continue
 			if line[0] == '#':
@@ -382,7 +399,6 @@ def get_variants(vcf_file, proteome_file, type):
 	while line:
 		spline = line.rstrip().split('\t')
 		try:
-			# Maybe I shouldn't subtract one from pos here - did it when I made the vcf file in the first place
 			chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1]), spline[2], spline[3], spline[4], float(spline[5])
 		except ValueError:
 			# Maybe write this to a log somewhere?
@@ -442,6 +458,8 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 	
 	changes = []
 	aa_substs = []
+	indels = []
+	indel_substs = []
 
 	# With hg38, we get a weird thing where some of the genes in proteome.bed.dna have no sequence associated with them.
 	# So...I guess I'll just skip those for now until I figure out why
@@ -459,8 +477,22 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		pos = int(re.findall(r'\d+', var)[0]) # using the -1 so we're counting from 0, not 1
 		orig_nt = var.split('-')[1].split(str(pos))[0]
 		new_nt = var.split(':')[0].split(str(pos))[1]
+		
+		# Here we removed the ones where it wasn't a 1 to 1 substitution.
+		# Now we automatically add it to the changes.
 		if len(orig_nt) != 1 or len(new_nt) != 1:
+			if reverse_flag:
+				#pos = len(full_seq) - pos
+				#orig_nt = orig_nt[::-1].translate(translate_table)
+				#new_nt = new_nt[::-1].translate(translate_table)
+				qual = var.split(':')[1]
+				prefix = var.split('-')[0]
+				write_to_status('%s\t%s-%s%d%s:%s' % (var, prefix, orig_nt, pos, new_nt, qual))
+				indels.append('%s-%s%d%s:%s' % (prefix, orig_nt, pos, new_nt, qual))
+			else:
+				indels.append(var)
 			continue
+		
 		triplet_start = ((pos/3)*3) # start of the triplet containing pos. counting from 0, not 1
 		triplet_orig = full_seq[triplet_start:(triplet_start+3)].upper()
 		triplet_subst = var.split(':')[0].split(str(pos))[-1]
@@ -492,7 +524,8 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 			else:
 				aa_substs.append((AA_old, pos/3+1, AA_new))
 		# If the new codon is a stop codon, 
-			
+		# uh...I found this comment here and it looks like I decided not to do whatever I was planning to do.
+		
 		# Check to see if this is the second substitution in a codon - if so, does the amino acid change with both?
 		if prev_start == triplet_start:
 			triplet_orig = full_seq[triplet_start:(triplet_start+3)].upper()
@@ -520,8 +553,8 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 					aa_substs.append((AA_old, pos/3+1, AA_new))
 		prev_start = triplet_start
 		prev_subst = [subst_pos, triplet_subst]
-	return changes, aa_substs
-
+	return changes, aa_substs, indels	
+	
 def write_out_aa(name, changed_vars, aa_substs, out_aa):
 	'''Creates the proteome.bed.aa.var file, which is just a list of all variants in the style of proteome.bed.var.'''
 	aa_sub_to_write = []
@@ -552,8 +585,8 @@ def write_out_aa_bed_dna(header_line, second_header, exon_headers, changed_vars,
 		out_aa_bed_dna.write('\t'.join(header_line))
 		# Second line:
 		second_header[0] = second_header_name+'-'+v
-		second_header[-1] = second_header_map_end[:-2]+' '+var+')'
-		out_aa_bed_dna.write(' '.join(second_header)+(' (VAR:%s-%s%d%s:%s)\n' % (var[0], subst[0], subst[1], subst[2], var.split(':')[1]))) # Will write the AA position starting from 0, not 1. This is what old QUILTS did. We can change it.
+		second_header[-1] = second_header_map_end[:-1]+' '+var+')'
+		out_aa_bed_dna.write(' '.join(second_header)+(' (VAR:%s-%s%d%s:%s)\n' % (var[0], subst[0], subst[1], subst[2], var.split(':')[1]))) # Will write the AA position starting from 0, not 1. 
 		# Sequence lines:
 		out_aa_bed_dna.write('\t'.join(exon_headers[0]))
 		var_pos = int(re.findall(r'\d+', var)[0])
@@ -572,8 +605,90 @@ def write_out_aa_bed_dna(header_line, second_header, exon_headers, changed_vars,
 				edit_made = True
 			seq_length += chunk_length
 		out_aa_bed_dna.write('\t'.join(exon_headers[-1]))
+
+def test_indels(exon_headers, indels):
+	'''Goes through all of the indels to make sure they are actually deleting parts of the exon.
+	Some of them don't - their first character, which gets added back in (G-AC576A, S-ACGGT239A, etc) 
+	is part of an exon, and the rest are not. Also removes any indel that's part of a start codon, because that causes a messy cascade of changes.'''
+	true_indels = []
+	for indel in indels:
+		indel_pos = int(re.findall(r'\d+', indel)[0])
+		if indel_pos < 3: # it's in a start codon
+			continue
+		seq_length = 0
+		for i in range(1, len(exon_headers)-1):
+			ex_head = exon_headers[i][0].split('\t')
+			chunk_length = int(ex_head[4])
+			if seq_length+chunk_length > indel_pos:
+				chunk_pos = indel_pos - seq_length
+				if chunk_pos != chunk_length-1:
+					true_indels.append(indel)
+					#write_to_status("Found one! %s %s" % (ex_head[0], indel))
+				#else:
+				#	write_to_status("Removing %s %s" % (ex_head[0], indel))
+				#	write_to_status("%d\t%d\t%s" % (chunk_pos, chunk_length, ex_head[-1]))
+				break
+			seq_length = seq_length+chunk_length
+	write_to_status(str(true_indels))
+	return true_indels
 		
-def sort_variants(proteome_file, variant_file):
+def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, out_indel_bed_dna):
+	'''Creates the proteome.indel.bed.var.dna file, which is the same as proteome.bed.dna but instead of an entry for each gene, has an entry for each indel.'''
+	header_to_change = header_line[3]
+	second_header_name = second_header[0]
+	second_header_map_end = second_header[-1]
+	for indel in indels:
+		# First line:
+		header_line[3] = header_to_change+'-indel'
+		out_indel_bed_dna.write('\t'.join(header_line))
+		# Second line:
+		second_header[0] = second_header_name+'-indel'
+		second_header[-1] = second_header_map_end[:-1]+' '+indel+')'
+		out_indel_bed_dna.write(' '.join(second_header)+'\n')
+		# Sequence lines:
+		out_indel_bed_dna.write('\t'.join(exon_headers[0])) # Pre-sequence
+		indel_pos = int(re.findall(r'\d+', indel)[0])
+		seq_length = 0
+		to_delete = indel.split(':')[0].split(str(indel_pos))[0].split('-')[1]
+		to_insert = indel.split(':')[0].split(str(indel_pos))[1]
+		edit_made = False
+		for i in range(1,len(exon_headers)-1):
+			ex_head = exon_headers[i][0].split('\t')
+			chunk_length = int(ex_head[4])
+			write_to_status(exon_headers[i][0])
+			if edit_made or seq_length+chunk_length <= indel_pos:
+				out_indel_bed_dna.write('\t'.join(exon_headers[i]))
+			else:
+				orig_seq_chunk = exon_headers[i][-1]
+				chunk_pos = indel_pos-seq_length
+				# What to do in this eventuality? 
+				# Because the deletion extends into the intron and not the next exon, just ignore it and make sure you edit the length appropriately.
+				if chunk_pos+len(to_delete) > chunk_length:
+					write_to_status("Found a deletion that goes beyond the exon. %s\t%s" % (ex_head[0], indel))
+				seq_chunk = orig_seq_chunk[:chunk_pos]+to_insert+orig_seq_chunk[chunk_pos+len(to_delete):]
+				if chunk_pos+len(to_delete) <= chunk_length:
+					new_length = chunk_length-len(to_delete)+len(to_insert)
+					#write_to_status("New length guessed: %d, Original length: %d, Deleted length: %d, New length calculated, should match first: %d" % (new_length, chunk_length, len(to_delete), len(seq_chunk)))
+				else:
+					new_length = chunk_pos+1 # adds one for the base we're adding back in
+					#write_to_status("New length guessed: %d, Original length: %d, Deleted length: %d, New length calculated, should match first: %d" % (chunk_pos, chunk_length, len(to_delete), len(seq_chunk)))
+					#write_to_status("%s to delete, %s to insert, %s orig, %s new, %s to replace" % (to_delete, to_insert, orig_seq_chunk, seq_chunk, orig_seq_chunk[chunk_pos:chunk_pos+len(to_delete)]))
+				#ex_head[4] = str(new_length)
+				tmp_ex_head = ex_head
+				tmp_ex_head[4] = str(new_length)
+				ex_head_to_write = '\t'.join(tmp_ex_head)
+				out_indel_bed_dna.write(ex_head_to_write+'\t'+seq_chunk)
+				edit_made = True
+				# Error testing, remove later
+				# Which ones are wrong and why? Which ones are right and why? Print everything
+				# Also, print what the variant is.
+				if orig_seq_chunk[chunk_pos:chunk_pos+len(to_delete)].upper() != to_delete.upper() and chunk_pos+len(to_delete) <= chunk_length:
+					write_to_status("Wrong sequence being deleted! %s\t%s\t%s\t%s" % (ex_head[0], indel, seq_chunk[chunk_pos:chunk_pos+len(to_delete)].upper(), orig_seq_chunk))
+					#write_to_status('%s\t%s' % (orig_seq_chunk[chunk_pos:chunk_pos+len(to_delete)].upper(), to_delete.upper()))
+			seq_length += chunk_length
+		out_indel_bed_dna.write('\t'.join(exon_headers[-1])) # Post-sequence	
+
+def sort_variants(proteome_file, variant_file, output_prefix):
 	'''Goes through the variants and sorts them by type, writing out a bunch of intermediate files in the process. Right now the types are "single-AA non-stop variant" and "not that", but eventually will have more.'''
 	global codon_map
 	
@@ -601,13 +716,16 @@ def sort_variants(proteome_file, variant_file):
 	
 	# Open some files to write to. Right now, only looking at single AA changes.
 	# I hate these filenames. Do they actually mean anything?
-	out_aa = open(file_base+"/proteome.bed.aa.var", 'w')
+	out_aa = open(file_base+"/"+output_prefix+".bed.aa.var", 'w')
 	# This one will basically just be that first line. Might want an extra line for each variant though, depends how it's used. Actually, almost certainly do.
-	out_aa_bed = open(file_base+"/proteome.aa.var.bed", 'w')
+	out_aa_bed = open(file_base+"/"+output_prefix+".aa.var.bed", 'w')
 	# proteome.bed.dna, but with the variants included. Def want an extra line for each variant.
-	out_aa_bed_dna = open(file_base+"/proteome.aa.var.bed.dna", 'w')
+	out_aa_bed_dna = open(file_base+"/"+output_prefix+".aa.var.bed.dna", 'w')
 	# Right now just proteome.bed.aa.var but with the non-AA variants. Doesn't do anything right now because I don't care about it very much.
-	out_other = open(file_base+"/proteome.bed.other.var", 'w')
+	out_indel = open(file_base+"/"+output_prefix+".bed.indel.var", 'w')
+	out_indel_bed = open(file_base+"/"+output_prefix+".indel.var.bed", 'w')
+	out_indel_bed_dna = open(file_base+"/"+output_prefix+".indel.var.bed.dna", 'w')
+	out_other = open(file_base+"/"+output_prefix+".bed.other.var", 'w')
 	
 	f = open(proteome_file, 'r')
 	line = f.readline()
@@ -618,11 +736,19 @@ def sort_variants(proteome_file, variant_file):
 			# Using a try/except block here to deal with the possibility of this being the first line
 			# There has to be a more graceful way to do that, right?
 			try:
-				changed_vars, aa_substs = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
+				changed_vars, aa_substs, indels = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 				if changed_vars != []:
 					write_out_aa(name, changed_vars, aa_substs, out_aa)
 					write_out_aa_bed(header_line.split('\t'), changed_vars, out_aa_bed)
 					write_out_aa_bed_dna(header_line.split('\t'), second_header.split(), exon_headers, changed_vars, aa_substs, out_aa_bed_dna)
+				if indels != []:
+					# Make sure none of them are just removing intron stuff
+					indels = test_indels(exon_headers, indels)
+					# If there are any left...
+					if indels != []:
+						out_indel.write("%s\t%s\n" % (name, ','.join(indels)))
+						out_indel_bed.write("chr%s\t%d\t%d\t%s-indel\t1000\t%s\t%d\t%d\t%s\t%d\t%s\t%s\n" % (chr, start, end, name, strand, start, end, spline[-4], exon_count, ','.join(exon_lengths), ','.join(exon_offsets)))
+						write_out_indel_bed_dna(header_line.split('\t'), second_header.split(), exon_headers, indels, out_indel_bed_dna)
 			except UnboundLocalError:
 				pass
 			# Start processing the new gene
@@ -642,11 +768,19 @@ def sort_variants(proteome_file, variant_file):
 		
 	# Do the last one
 	try:
-		changed_vars, aa_substs = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
+		changed_vars, aa_substs, indels = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
 		if changed_vars != []:
 			write_out_aa(name, changed_vars, aa_substs, out_aa)
 			write_out_aa_bed(header_line.split('\t'), changed_vars, out_aa_bed)
 			write_out_aa_bed_dna(header_line.split('\t'), second_header.split(), exon_headers, changed_vars, aa_substs, out_aa_bed_dna)
+		if indels != []:
+			# Make sure none of them are just removing intron stuff
+			indels = test_indels(exon_headers, indels)
+			# If there are any left...
+			if indels != []:
+				out_indel.write("%s\t%s\n" % (name, ','.join(indels)))
+				out_indel_bed.write("chr%s\t%d\t%d\t%s-indel\t1000\t%s\t%d\t%d\t%s\t%d\t%s\t%s\n" % (chr, start, end, name, strand, start, end, spline[-4], exon_count, ','.join(exon_lengths), ','.join(exon_offsets)))
+				write_out_indel_bed_dna(header_line.split('\t'), second_header.split(), exon_headers, indels, out_indel_bed_dna)
 	except UnboundLocalError:
 		pass
 
@@ -655,6 +789,9 @@ def sort_variants(proteome_file, variant_file):
 	out_aa.close()
 	out_aa_bed.close()
 	out_aa_bed_dna.close()
+	out_indel.close()
+	out_indel_bed.close()
+	out_indel_bed_dna.close()
 	out_other.close()
 	
 ### These functions are used to translate DNA variants into variant proteins.
@@ -688,7 +825,7 @@ def translate_seq(sequence, strand):
 	# That could either be at the actual end of the sequence, or at a variant that adds a stop.
 	return translated.split('*')[0]
 
-def translate(log_dir):
+def translate(log_dir, bed_file):
 	'''Reads in a bed.dna file and translates it to a protein .fasta file.'''
 	# Get the descriptions
 	desc = {}
@@ -710,8 +847,8 @@ def translate(log_dir):
 	f.close()
 	
 	# The rest of it
-	f = open(log_dir+"proteome.aa.var.bed.dna",'r')
-	out_fasta = open(log_dir+"proteome.aa.var.bed.dna.fasta",'w') # The original QUILTS writes two other files but they're just duplicates of proteome.aa.var.bed and proteome.aa.var.bed.dna, it seems. For now I'm leaving them out.
+	f = open(log_dir+bed_file,'r')
+	out_fasta = open(log_dir+bed_file+".fasta",'w') # The original QUILTS writes two other files but they're just duplicates of proteome.aa.var.bed and proteome.aa.var.bed.dna, it seems. For now I'm leaving them out.
 	line = f.readline()
 	sequence = ""
 	prev_AA_subst = []
@@ -768,8 +905,11 @@ def translate(log_dir):
 
 ### These functions are used to make the peptide fasta files.
 
-def trypsinize(sequence):
-	'''Virtually trypsinizes a protein and returns its tryptic peptides. Right now, just chops it after any K or R that isn't followed by a P.'''
+def trypsinize(sequence, pos = 0):
+	'''Virtually trypsinizes a protein and returns its tryptic peptides. 
+	If a position is given, it only returns the peptides following that position (used for indels
+	and splice junctions, where anything before the variant is unchanged).
+	Right now, just chops it after any K or R that isn't followed by a P.'''
 	tryptic_peptides = []
 	seq = ''
 	for i in range(len(sequence)):
@@ -780,7 +920,8 @@ def trypsinize(sequence):
 		except IndexError:
 			next_letter = '*'
 		if (letter == 'K' or letter == 'R') and next_letter != 'P':
-			tryptic_peptides.append(seq)
+			if pos <= i:
+				tryptic_peptides.append(seq)
 			seq = ''
 	if seq != '':
 		tryptic_peptides.append(seq)
@@ -884,7 +1025,7 @@ def assign_variants(gene, tryptic_peptides, variants, out_file, no_missed_cleava
 		prev_peptides = cur_peptides
 		total_aas += len(peptide)
 
-def make_peptide_fasta(log_dir, no_missed_cleavage):
+def make_aa_peptide_fasta(log_dir, no_missed_cleavage):
 	'''Main function for the tryptic peptide fasta file.'''
 	# Grab all of the amino acid variants
 	vars = {}
@@ -948,6 +1089,41 @@ def make_peptide_fasta(log_dir, no_missed_cleavage):
 	except UnboundLocalError:
 		pass
 		
+	f.close()
+	tryp_fasta.close()
+
+def make_indel_peptide_fasta(log_dir):
+	'''Main function for adding indels to the tryptic peptide fasta.
+	Basically, add the peptide that includes the indel and everything that comes after it.
+	Unless the indel changes the length by a non-frameshift amount,
+	in which case just save the portion that includes the indel'''
+	# Grab the indel variants
+	vars = {}
+	f = open(log_dir+'proteome.indel.var.bed.dna.fasta','r')
+	tryp_fasta = open(log_dir+'tryptic_proteome.fasta','a') # will append to the file
+	line = f.readline()
+	while line:
+		indel = line.split()[-1].split(':')[0]
+		gene = line.split()[0]
+		nt_pos = int(re.findall(r'\d+', indel)[0]) # The DNA position, starting from zero
+		strand = line.split()[1][-1]
+		to_delete = indel.split(str(nt_pos))[0].split('-')[1]
+		to_insert = indel.split(str(nt_pos))[1]
+		seq = f.readline().rstrip() # Next line is the sequence
+		if strand == '+':
+			aa_pos = nt_pos/3 # Again, indexes from zero
+		else:
+			aa_pos = len(seq) - nt_pos/3
+		tryptic_peptides = trypsinize(seq, aa_pos)
+		if (len(to_insert) - len(to_delete))%3 == 0: # no change in frame, so only the indel is changed
+			tryptic_peptides = [tryptic_peptides[0]]
+		for i in range(len(tryptic_peptides)):
+			tp = tryptic_peptides[i]
+			if 25 >= len(tp) >= 6:
+				tryp_fasta.write("%s\tPeptide %d\n" % (line.rstrip(), i))
+				tryp_fasta.write("%s\n" % tp)
+		line = f.readline() # Next line is the header
+	
 	f.close()
 	tryp_fasta.close()
 
@@ -1526,6 +1702,11 @@ def elongated_exon(prot_info, models, begin_intron, num_observ, start_exon_2, th
 	except UnboundLocalError:
 		return "NO NAME", outside
 
+### These functions are used to translate junction files.
+
+def translate_junctions():
+	pass
+
 ### These functions are used everywhere.
 
 def write_to_log(message, log_file):
@@ -1561,7 +1742,7 @@ if __name__ == "__main__":
 
 	# Set up log/status files
 	output_dir = args.output_dir
-	results_folder = set_up_output_dir(output_dir, args.proteome)
+	results_folder = set_up_output_dir(output_dir, args)
 	write_to_status("Started")
 	write_to_log("Version Python.0", logfile)
 	write_to_log("Reference DB used: "+args.proteome.split("/")[-1], logfile)
@@ -1621,16 +1802,20 @@ if __name__ == "__main__":
 		# Combine (some more) and sort variants.
 		# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
 		# I will continue to do this, probably? I'll just ignore more later on
-		sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var")
+		sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var", "proteome")
 		write_to_status("Variants sorted")	
 
 		# Translate the variant sequences into a fasta file.
-		translate(results_folder+"/log/")
-		write_to_status("Translated")	
+		translate(results_folder+"/log/", "proteome.aa.var.bed.dna")
+		write_to_status("Translated SAAVs")	
+		translate(results_folder+"/log/", "proteome.indel.var.bed.dna")
+		write_to_status("Translated indels")
 
 		# Time for tryptic peptides! Remember: C-term (after) K/R residues
-		make_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
-		write_to_status("Tryptic peptides done. Should be finished.")
+		make_aa_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
+		write_to_status("Tryptic peptides done.")
+		make_indel_peptide_fasta(results_folder+"/log/")
+		write_to_status("Indel tryptic peptides done.")
 	
 	# Let's move on to alternate splice junctions.
 	# We're removing some of the earlier parts for now to expedite testing.
@@ -1653,8 +1838,31 @@ if __name__ == "__main__":
 		shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
 		filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
 		write_to_status("Filtered alternative splices into the appropriate types.")
-		# merge_junctions_bed_dir.pl "$junction" "$result_dir/log/"
-		# filter_known_transcripts.pl "$result_dir/log/merged-junctions.bed" "$db/transcriptome.bed"
-		# filter_A.pl "$result_dir/log/merged-junctions.filter.bed" "$db/proteome.bed" 0 $threshold_A $threshold_AN $threshold_N
-		# read_chr_bed "$result_dir/log/merged-junctions.filter.bed.A.bed"
+		# Make a fasta out of the alternative splices with conserved exon boundaries
+		try:
+			check_call("%s/read_chr_bed %s/log/merged-junctions.filter.A.bed %s" % (script_dir, results_folder, args.genome), shell=True)
+			# Don't know why this copies instead of moving. If I never use merged-junctions.filter.A.bed.dna again, just move it or have read_chr_bed output the alternative.bed.dna file instead.
+			shutil.copy(results_folder+'/log/merged-junctions.filter.A.bed.dna', results_folder+'/log/alternative.bed.dna')
+		except CalledProcessError:
+			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
+		# Grabbing the variants that are in these splice junctions, I guess. This seems like fishing for dregs.
+		if args.somatic:
+			get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed.dna", "S")
+			if args.germline: # Move the somatic variants so they don't get overwritten by the germline
+				shutil.move(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.S.var")
+			else:
+				shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.S.var")
+		if args.germline:
+			get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed.dna", "G")
+			shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.G.var")
+			if args.somatic: # Put the somatic variants in with the germline ones
+				with open(results_folder+"/log/merged-junctions.filter.A.bed.S.var", 'r') as src:
+					with open(results_folder+"/log/merged-junctions.filter.A.bed.var",'w') as dest:
+						shutil.copyfileobj(src, dest)
+				dest.close()
+				src.close()
+		if args.somatic or args.germline:
+			sort_variants(results_folder+"/log/merged-junctions.filter.A.bed.dna", results_folder+"/log/merged-junctions.filter.A.bed.var", "merged-junctions.filter.A")
+			shutil.copyfileobj(results_folder+"/log/merged-junctions.filter.A.aa.var.bed.dna", results_folder+"/log/alternative.bed.dna") # Move them into the file with the other junctions for translating
 		
+		# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
