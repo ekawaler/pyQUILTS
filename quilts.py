@@ -20,7 +20,7 @@ Complications to watch out for when defining tryptic peptides: right now we assu
 
 Variant Start Codons: Right now, if there's a SNP in the start codon, we just throw that out. At some point, perhaps we should go through and look for the next possible start codon, assuming the transcription will start from there, but honestly, that is probably just going to make a garbage protein, so we're ignoring it for the time being.
 
-Remember at some point to deal with insertions/deletions that change the number of nucleotides, since we currently are not.
+Right now, there are no proteins/peptides that have both an indel and some other variant, unlike the SAAVs where we have tryptic peptides with all possible combinations of variants. This will probably change in the future, but for now if you've got an indel that's all you get.
 
 Am I ever going to get rid of duplicate tryptic peptides (peptides that show up in multiple proteins)? Maybe that can be a postprocessing step. Or maybe that's a search problem. There aren't very many.
 
@@ -370,7 +370,7 @@ def get_variants(vcf_file, proteome_file, type):
 	while line:
 		spline = line.rstrip().split('\t')
 		try:
-			chr, start, name, lengths, offsets = spline[0].lstrip('chr'), int(spline[1]), spline[3], spline[10], spline[11]
+			chr, start, name, lengths, offsets = spline[0].lstrip('chr'), int(spline[1]), spline[3], spline[-2], spline[-1]
 		except ValueError:
 			# Maybe write this to a log somewhere?
 			warnings.warn("Failed to parse %s" % line)
@@ -487,7 +487,6 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 				#new_nt = new_nt[::-1].translate(translate_table)
 				qual = var.split(':')[1]
 				prefix = var.split('-')[0]
-				write_to_status('%s\t%s-%s%d%s:%s' % (var, prefix, orig_nt, pos, new_nt, qual))
 				indels.append('%s-%s%d%s:%s' % (prefix, orig_nt, pos, new_nt, qual))
 			else:
 				indels.append(var)
@@ -623,13 +622,10 @@ def test_indels(exon_headers, indels):
 				chunk_pos = indel_pos - seq_length
 				if chunk_pos != chunk_length-1:
 					true_indels.append(indel)
-					#write_to_status("Found one! %s %s" % (ex_head[0], indel))
 				#else:
 				#	write_to_status("Removing %s %s" % (ex_head[0], indel))
-				#	write_to_status("%d\t%d\t%s" % (chunk_pos, chunk_length, ex_head[-1]))
 				break
 			seq_length = seq_length+chunk_length
-	write_to_status(str(true_indels))
 	return true_indels
 		
 def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, out_indel_bed_dna):
@@ -655,7 +651,6 @@ def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, ou
 		for i in range(1,len(exon_headers)-1):
 			ex_head = exon_headers[i][0].split('\t')
 			chunk_length = int(ex_head[4])
-			write_to_status(exon_headers[i][0])
 			if edit_made or seq_length+chunk_length <= indel_pos:
 				out_indel_bed_dna.write('\t'.join(exon_headers[i]))
 			else:
@@ -668,12 +663,8 @@ def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, ou
 				seq_chunk = orig_seq_chunk[:chunk_pos]+to_insert+orig_seq_chunk[chunk_pos+len(to_delete):]
 				if chunk_pos+len(to_delete) <= chunk_length:
 					new_length = chunk_length-len(to_delete)+len(to_insert)
-					#write_to_status("New length guessed: %d, Original length: %d, Deleted length: %d, New length calculated, should match first: %d" % (new_length, chunk_length, len(to_delete), len(seq_chunk)))
 				else:
 					new_length = chunk_pos+1 # adds one for the base we're adding back in
-					#write_to_status("New length guessed: %d, Original length: %d, Deleted length: %d, New length calculated, should match first: %d" % (chunk_pos, chunk_length, len(to_delete), len(seq_chunk)))
-					#write_to_status("%s to delete, %s to insert, %s orig, %s new, %s to replace" % (to_delete, to_insert, orig_seq_chunk, seq_chunk, orig_seq_chunk[chunk_pos:chunk_pos+len(to_delete)]))
-				#ex_head[4] = str(new_length)
 				tmp_ex_head = ex_head
 				tmp_ex_head[4] = str(new_length)
 				ex_head_to_write = '\t'.join(tmp_ex_head)
@@ -684,7 +675,6 @@ def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, ou
 				# Also, print what the variant is.
 				if orig_seq_chunk[chunk_pos:chunk_pos+len(to_delete)].upper() != to_delete.upper() and chunk_pos+len(to_delete) <= chunk_length:
 					write_to_status("Wrong sequence being deleted! %s\t%s\t%s\t%s" % (ex_head[0], indel, seq_chunk[chunk_pos:chunk_pos+len(to_delete)].upper(), orig_seq_chunk))
-					#write_to_status('%s\t%s' % (orig_seq_chunk[chunk_pos:chunk_pos+len(to_delete)].upper(), to_delete.upper()))
 			seq_length += chunk_length
 		out_indel_bed_dna.write('\t'.join(exon_headers[-1])) # Post-sequence	
 
@@ -1116,7 +1106,9 @@ def make_indel_peptide_fasta(log_dir):
 			aa_pos = len(seq) - nt_pos/3
 		tryptic_peptides = trypsinize(seq, aa_pos)
 		if (len(to_insert) - len(to_delete))%3 == 0: # no change in frame, so only the indel is changed
-			tryptic_peptides = [tryptic_peptides[0]]
+			if len(tryptic_peptides) > 0:
+				write_to_status("No tryptic peptides: %s\t%s\t%s\t%s" % (gene, indel, seq, strand))
+				tryptic_peptides = [tryptic_peptides[0]]
 		for i in range(len(tryptic_peptides)):
 			tp = tryptic_peptides[i]
 			if 25 >= len(tp) >= 6:
@@ -1839,6 +1831,7 @@ if __name__ == "__main__":
 		filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
 		write_to_status("Filtered alternative splices into the appropriate types.")
 		# Make a fasta out of the alternative splices with conserved exon boundaries
+		write_to_status("About to do a read_chr_bed")
 		try:
 			check_call("%s/read_chr_bed %s/log/merged-junctions.filter.A.bed %s" % (script_dir, results_folder, args.genome), shell=True)
 			# Don't know why this copies instead of moving. If I never use merged-junctions.filter.A.bed.dna again, just move it or have read_chr_bed output the alternative.bed.dna file instead.
@@ -1846,23 +1839,29 @@ if __name__ == "__main__":
 		except CalledProcessError:
 			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
 		# Grabbing the variants that are in these splice junctions, I guess. This seems like fishing for dregs.
+		write_to_status("Done with read_chr_bed")
 		if args.somatic:
-			get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed.dna", "S")
-			if args.germline: # Move the somatic variants so they don't get overwritten by the germline
-				shutil.move(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.S.var")
-			else:
-				shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.S.var")
+			get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed", "S")
+			if not args.germline: # Move the somatic variants to the merged .bed.var file, otherwise wait
+				shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.S.var", results_folder+"/log/merged-junctions.filter.A.bed.var")
 		if args.germline:
-			get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed.dna", "G")
-			shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.G.var")
-			if args.somatic: # Put the somatic variants in with the germline ones
-				with open(results_folder+"/log/merged-junctions.filter.A.bed.S.var", 'r') as src:
+			get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed", "G")
+			if args.somatic: # Put the germline variants in with the somatic ones
+				with open(results_folder+"/log/merged-junctions.filter.A.bed.G.var", 'r') as src:
 					with open(results_folder+"/log/merged-junctions.filter.A.bed.var",'w') as dest:
 						shutil.copyfileobj(src, dest)
 				dest.close()
 				src.close()
+			else:
+				shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.G.var")
 		if args.somatic or args.germline:
 			sort_variants(results_folder+"/log/merged-junctions.filter.A.bed.dna", results_folder+"/log/merged-junctions.filter.A.bed.var", "merged-junctions.filter.A")
-			shutil.copyfileobj(results_folder+"/log/merged-junctions.filter.A.aa.var.bed.dna", results_folder+"/log/alternative.bed.dna") # Move them into the file with the other junctions for translating
+			# Move them into the file with the other junctions for translating
+			with open(results_folder+"/log/merged-junctions.filter.A.aa.var.bed.dna", 'r') as src:
+					with open(results_folder+"/log/alternative.bed.dna",'w') as dest:
+						shutil.copyfileobj(src, dest)
+			dest.close()
+			src.close()
 		
 		# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
+		# Basically, though, can use the indel translation function (keep the exon with the variant and everything that comes after) for all of them except the ones where the exon boundaries are both new, in which case we need to do all six reading frames. And we saved those...where? notA?
