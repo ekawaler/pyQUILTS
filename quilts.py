@@ -1109,7 +1109,7 @@ def make_indel_peptide_fasta(log_dir):
 			if len(tryptic_peptides) > 0:
 				tryptic_peptides = [tryptic_peptides[0]]
 			else:
-				write_to_status("No tryptic peptides: %s, %s, %s, %s" % (gene, indel, seq, strand))
+				write_to_status("No tryptic peptides: %s, %s, %s, %s" % (gene[1:], indel, seq, strand))
 		for i in range(len(tryptic_peptides)):
 			tp = tryptic_peptides[i]
 			if 25 >= len(tp) >= 6:
