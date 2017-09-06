@@ -1107,8 +1107,9 @@ def make_indel_peptide_fasta(log_dir):
 		tryptic_peptides = trypsinize(seq, aa_pos)
 		if (len(to_insert) - len(to_delete))%3 == 0: # no change in frame, so only the indel is changed
 			if len(tryptic_peptides) > 0:
-				write_to_status("No tryptic peptides: %s\t%s\t%s\t%s" % (gene, indel, seq, strand))
 				tryptic_peptides = [tryptic_peptides[0]]
+			else:
+				write_to_status("No tryptic peptides: %s, %s, %s, %s" % (gene, indel, seq, strand))
 		for i in range(len(tryptic_peptides)):
 			tp = tryptic_peptides[i]
 			if 25 >= len(tp) >= 6:
