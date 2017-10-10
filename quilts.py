@@ -57,7 +57,7 @@ def parse_input_arguments():
 	parser = argparse.ArgumentParser(description="QUILTS") # What even is this description for, anyway? Maybe I'll remove it eventually
 	parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts",
 		help="full path to output folder")
-	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20130727", help="full path to folder containing reference proteome")
+	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20160914", help="full path to folder containing reference proteome")
 	parser.add_argument('--genome', type=str, default="/ifs/data/proteomics/tcga/databases/genome_human", help="full path to folder containing reference genome")
 	#parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna/vcf/TCGA-20130502-S", help="VCF file of somatic variants")
 	#parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna-germline/vcf/GATK26-G-Nature", help="VCF file of germline variants")
@@ -495,6 +495,9 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		triplet_start = ((pos/3)*3) # start of the triplet containing pos. counting from 0, not 1
 		triplet_orig = full_seq[triplet_start:(triplet_start+3)].upper()
 		triplet_subst = var.split(':')[0].split(str(pos))[-1]
+		if triplet_orig == '':
+			print '\n'+'Empty codon: '+var, full_seq, len(full_seq), triplet_start, header_line
+			continue
 		subst_pos = pos%3
 		triplet_new = triplet_orig[:subst_pos] + triplet_subst + triplet_orig[subst_pos+1:] # This did! change it in both.
 		# If it's the reverse strand, check the reversed and translated triplet instead
@@ -668,7 +671,7 @@ def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, ou
 				tmp_ex_head = ex_head
 				tmp_ex_head[4] = str(new_length)
 				ex_head_to_write = '\t'.join(tmp_ex_head)
-				out_indel_bed_dna.write(ex_head_to_write+'\t'+seq_chunk)
+				out_indel_bed_dna.write(ex_head_to_write+'\t'+seq_chunk.rstrip()+'\n')
 				edit_made = True
 				# Error testing, remove later
 				# Which ones are wrong and why? Which ones are right and why? Print everything
@@ -1758,16 +1761,16 @@ if __name__ == "__main__":
 		remove_somatic_duplicates(args.germline, args.somatic)
 	write_to_status("Somatic duplicates removed")
 
-	'''# Call read_chr_bed.c, which takes the reference genome and proteome.bed file as input and produces
+	# Call read_chr_bed.c, which takes the reference genome and proteome.bed file as input and produces
 	# a fasta file of exomes.
 	# Possible but unlikely future work: rewrite the C file (still in C though) so it's more efficient?
 	# I dunno, it seems fine for now.
 	try:
 		check_call("%s/read_chr_bed %s/log/proteome.bed %s" % (script_dir, results_folder, args.genome), shell=True)
 	except CalledProcessError:
-		raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file.\nAborting program.")'''
+		raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file.\nAborting program.")
 	# Commented the above out for speed - it's slow, so for current testing purposes I'm just copying it from elsewhere
-	shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/proteome.bed.dna', results_folder+"/log/")
+	#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/proteome.bed.dna', results_folder+"/log/")
 	
 	# Next, create a proteome.bed file containing only variants...probably.
 	# I could probably combine them more prettily, but for now I'll just concatenate the files.
