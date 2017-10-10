@@ -968,7 +968,7 @@ def write_peptides(gene, vars, peptide_start_pos, peptide, out_file):
 		pep_to_write = new_pep.split('*')[0]
 		# Letting there be a missed cleavage just in case the variant changes the cleaving.
 		if 25 >= len(pep_to_write) >= 6 and len(trypsinize(pep_to_write)) <= 2:
-			out_file.write('>%s START:%d END:%d VAR:%s\n' % (gene, peptide_start_pos, peptide_start_pos+len(new_pep)-1, ','.join(var_string)))
+			out_file.write('>%s START:%d END:%d VAR:%s\n' % (gene, peptide_start_pos+1, peptide_start_pos+len(new_pep), ','.join(var_string)))
 			out_file.write('%s\n' % pep_to_write)
 		new_peptides.append([new_pep, var_string])
 	return new_peptides
@@ -986,7 +986,7 @@ def write_missed_cleavage_peptides(gene, prev_peptides, cur_peptides, cur_start_
 						vars = i[1]+j[1]
 						pep_to_write = (i[0]+j[0]).split('*')[0]
 						if 25 >= len(pep_to_write) >= 6 and len(trypsinize(pep_to_write)) <=2 :
-							out_file.write('>%s START:%d END:%d (missed cleavage after %d) VAR:%s\n' % (gene, prev_peptide_start, cur_peptide_end, cur_start_pos-1, ','.join(vars)))
+							out_file.write('>%s START:%d END:%d (missed cleavage after %d) VAR:%s\n' % (gene, prev_peptide_start+1, cur_peptide_end+1, cur_start_pos, ','.join(vars)))
 							out_file.write('%s\n' % pep_to_write)
 
 def assign_variants(gene, tryptic_peptides, variants, out_file, no_missed_cleavage):
