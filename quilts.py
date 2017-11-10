@@ -135,15 +135,14 @@ def set_up_output_dir(output_dir, args):
 	except IOError:
 		raise SystemExit("ERROR: Reference proteome .bed file not found at "+args.proteome+"/proteome.bed.\nAborting program.")
 	# Not sure if these four should be quite so important.
-	if args.somatic or args.germline:
-		try:
-			shutil.copy(args.proteome+"/proteome-descriptions.txt",results_folder+"/log/")
-		except IOError:
-			raise SystemExit("ERROR: Reference proteome gene descriptions file not found at "+args.proteome+"/proteome-descriptions.txt.\nAborting program.")
-		try:
-			shutil.copy(args.proteome+"/proteome-genes.txt",results_folder+"/log/")
-		except IOError:
-			raise SystemExit("ERROR: Reference proteome gene names file not found at "+args.proteome+"/proteome-genes.txt.\nAborting program.")
+	try:
+		shutil.copy(args.proteome+"/proteome-descriptions.txt",results_folder+"/log/")
+	except IOError:
+		raise SystemExit("ERROR: Reference proteome gene descriptions file not found at "+args.proteome+"/proteome-descriptions.txt.\nAborting program.")
+	try:
+		shutil.copy(args.proteome+"/proteome-genes.txt",results_folder+"/log/")
+	except IOError:
+		raise SystemExit("ERROR: Reference proteome gene names file not found at "+args.proteome+"/proteome-genes.txt.\nAborting program.")
 	if args.junction:
 		try:
 			shutil.copy(args.proteome+"/proteome-descriptions.txt",results_folder+"/log/alternative-descriptions.txt")
@@ -685,9 +684,6 @@ def sort_variants(proteome_file, variant_file, output_prefix):
 	'''Goes through the variants and sorts them by type, writing out a bunch of intermediate files in the process. Right now the types are "single-AA non-stop variant" and "not that", but eventually will have more.'''
 	global codon_map
 	
-	# Setting this up here because this is the first time we'll use it. But it won't be the last.
-	codon_map = {"TTT":"F","TTC":"F","TTA":"L","TTG":"L","CTT":"L","CTC":"L","CTA":"L","CTG":"L","ATT":"I","ATC":"I","ATA":"I","ATG":"M","GTT":"V","GTC":"V","GTA":"V","GTG":"V","TCT":"S","TCC":"S","TCA":"S","TCG":"S","CCT":"P","CCC":"P","CCA":"P","CCG":"P","ACT":"T","ACC":"T","ACA":"T","ACG":"T","GCT":"A","GCC":"A","GCA":"A","GCG":"A","TAT":"Y","TAC":"Y","TAA":"*","TAG":"*","CAT":"H","CAC":"H","CAA":"Q","CAG":"Q","AAT":"N","AAC":"N","AAA":"K","AAG":"K","GAT":"D","GAC":"D","GAA":"E","GAG":"E","TGT":"C","TGC":"C","TGA":"*","TGG":"W","CGT":"R","CGC":"R","CGA":"R","CGG":"R","AGT":"S","AGC":"S","AGA":"R","AGG":"R","GGT":"G","GGC":"G","GGA":"G","GGG":"G"}
-	
 	# Grab all the variants and their locations within their genes
 	variants_map = {}
 	f = open(variant_file, 'r')
@@ -1085,7 +1081,7 @@ def make_aa_peptide_fasta(log_dir, no_missed_cleavage):
 	f.close()
 	tryp_fasta.close()
 
-def make_indel_peptide_fasta(log_dir):
+def make_indel_peptide_fasta(log_dir, logfile):
 	'''Main function for adding indels to the tryptic peptide fasta.
 	Basically, add the peptide that includes the indel and everything that comes after it.
 	Unless the indel changes the length by a non-frameshift amount,
@@ -1112,7 +1108,7 @@ def make_indel_peptide_fasta(log_dir):
 			if len(tryptic_peptides) > 0:
 				tryptic_peptides = [tryptic_peptides[0]]
 			else:
-				write_to_status("No tryptic peptides: %s, %s, %s, %s" % (gene[1:], indel, seq, strand))
+				write_to_log("No tryptic peptides: %s, %s, %s, %s" % (gene[1:], indel, seq, strand), logfile)
 		for i in range(len(tryptic_peptides)):
 			tp = tryptic_peptides[i]
 			if 25 >= len(tp) >= 6:
@@ -1700,8 +1696,45 @@ def elongated_exon(prot_info, models, begin_intron, num_observ, start_exon_2, th
 
 ### These functions are used to translate junction files.
 
-def translate_junctions():
-	pass
+
+def translate_junctions(input_file):
+	'''Main function for adding non-frameshifted junctions to the tryptic peptide fasta.
+	Basically, add the peptide that includes the junction and everything that comes after it.
+	Later: maybe remove the parts that come after it if it isn't frameshifted? That might be complicated.
+	NOT FINISHED'''
+	# Grab the indel variants
+	vars = {}
+	f = open(input_file,'r')
+	tryp_fasta = open(log_dir+'tryptic_proteome.fasta','a') # will append to the file
+	line = f.readline()
+	while line:
+		indel = line.split()[-1].split(':')[0]
+		gene = line.split()[0]
+		nt_pos = int(re.findall(r'\d+', indel)[0]) # The DNA position, starting from zero
+		strand = line.split()[1][-1]
+		to_delete = indel.split(str(nt_pos))[0].split('-')[1]
+		to_insert = indel.split(str(nt_pos))[1]
+		seq = f.readline().rstrip() # Next line is the sequence
+		if strand == '+':
+			aa_pos = nt_pos/3 # Again, indexes from zero
+		else:
+			aa_pos = len(seq) - nt_pos/3
+		tryptic_peptides = trypsinize(seq, aa_pos)
+		if (len(to_insert) - len(to_delete))%3 == 0: # no change in frame, so only the indel is changed
+			if len(tryptic_peptides) > 0:
+				tryptic_peptides = [tryptic_peptides[0]]
+			else:
+				write_to_log("No tryptic peptides: %s, %s, %s, %s" % (gene[1:], indel, seq, strand), logfile)
+		for i in range(len(tryptic_peptides)):
+			tp = tryptic_peptides[i]
+			if 25 >= len(tp) >= 6:
+				tryp_fasta.write("%s\tPeptide %d\n" % (line.rstrip(), i))
+				tryp_fasta.write("%s\n" % tp)
+		line = f.readline() # Next line is the header
+	
+	f.close()
+	tryp_fasta.close()
+
 
 ### These functions are used everywhere.
 
@@ -1742,6 +1775,9 @@ if __name__ == "__main__":
 	write_to_status("Started")
 	write_to_log("Version Python.0", logfile)
 	write_to_log("Reference DB used: "+args.proteome.split("/")[-1], logfile)
+	
+	# Set up codon map
+	codon_map = {"TTT":"F","TTC":"F","TTA":"L","TTG":"L","CTT":"L","CTC":"L","CTA":"L","CTG":"L","ATT":"I","ATC":"I","ATA":"I","ATG":"M","GTT":"V","GTC":"V","GTA":"V","GTG":"V","TCT":"S","TCC":"S","TCA":"S","TCG":"S","CCT":"P","CCC":"P","CCA":"P","CCG":"P","ACT":"T","ACC":"T","ACA":"T","ACG":"T","GCT":"A","GCC":"A","GCA":"A","GCG":"A","TAT":"Y","TAC":"Y","TAA":"*","TAG":"*","CAT":"H","CAC":"H","CAA":"Q","CAG":"Q","AAT":"N","AAC":"N","AAA":"K","AAG":"K","GAT":"D","GAC":"D","GAA":"E","GAG":"E","TGT":"C","TGC":"C","TGA":"*","TGG":"W","CGT":"R","CGC":"R","CGA":"R","CGG":"R","AGT":"S","AGC":"S","AGA":"R","AGG":"R","GGT":"G","GGC":"G","GGA":"G","GGG":"G"}
 	
 	# Time to merge and quality-threshold the variant files!
 	if args.somatic:
@@ -1810,7 +1846,7 @@ if __name__ == "__main__":
 		# Time for tryptic peptides! Remember: C-term (after) K/R residues
 		make_aa_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
 		write_to_status("Tryptic peptides done.")
-		make_indel_peptide_fasta(results_folder+"/log/")
+		make_indel_peptide_fasta(results_folder+"/log/", logfile)
 		write_to_status("Indel tryptic peptides done.")
 	
 	# Let's move on to alternate splice junctions.
@@ -1826,11 +1862,11 @@ if __name__ == "__main__":
 				write_to_log("Could not copy junctions.txt to junctions.bed - check MapSplice junction file location", logfile)
 				warnings.warn("Could not copy %s/junctions.txt to junctions.bed - check MapSplice junction file location. Skipping..." % args.junction)
 		# Merge junction files found in junction folder.
-		'''junc_flag = merge_junction_files(args.junction, results_folder+'/log')
+		junc_flag = merge_junction_files(args.junction, results_folder+'/log')
 		if junc_flag:
 			args.junction = None
 		quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
-		filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)'''
+		filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)
 		shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
 		filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
 		write_to_status("Filtered alternative splices into the appropriate types.")
@@ -1842,8 +1878,11 @@ if __name__ == "__main__":
 			shutil.copy(results_folder+'/log/merged-junctions.filter.A.bed.dna', results_folder+'/log/alternative.bed.dna')
 		except CalledProcessError:
 			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
+		write_to_status("Done with read_chr_bed to create alternative.bed.dna")
+				
+		'''
 		# Grabbing the variants that are in these splice junctions, I guess. This seems like fishing for dregs.
-		write_to_status("Done with read_chr_bed")
+		# Removing this for now, just because it takes so long and I might want to do it differently.
 		if args.somatic:
 			get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed", "S")
 			if not args.germline: # Move the somatic variants to the merged .bed.var file, otherwise wait
@@ -1862,10 +1901,32 @@ if __name__ == "__main__":
 			sort_variants(results_folder+"/log/merged-junctions.filter.A.bed.dna", results_folder+"/log/merged-junctions.filter.A.bed.var", "merged-junctions.filter.A")
 			# Move them into the file with the other junctions for translating
 			with open(results_folder+"/log/merged-junctions.filter.A.aa.var.bed.dna", 'r') as src:
-					with open(results_folder+"/log/alternative.bed.dna",'w') as dest:
+					with open(results_folder+"/log/alternative.bed.dna",'a') as dest:
 						shutil.copyfileobj(src, dest)
 			dest.close()
 			src.close()
+		'''
+		
+		# Okay, well, I'm going to try to just do the same thing on A_, AN, and AN_.
+		write_to_status("About to do a read_chr_bed")
+		shutil.copy(results_folder+"/log/merged-junctions.filter.A_.bed", results_folder+"/log/merged-junctions.filter.A_AN.bed")
+		with open(results_folder+"/log/merged-junctions.filter.AN.bed", 'r') as src:
+			with open(results_folder+"/log/merged-junctions.filter.A_AN.bed",'a') as dest:
+				shutil.copyfileobj(src, dest) # Adds in AN
+
+		# Does the read_chr_bed		
+		try:
+			check_call("%s/read_chr_bed %s/log/merged-junctions.filter.A_AN.bed %s" % (script_dir, results_folder, args.genome), shell=True)
+			# Don't know why this copies instead of moving. If I never use merged-junctions.filter.A.bed.dna again, just move it or have read_chr_bed output the alternative.bed.dna file instead.
+			shutil.copy(results_folder+'/log/merged-junctions.filter.A_AN.bed.dna', results_folder+'/log/alternative_frameshift.bed.dna')
+		except CalledProcessError:
+			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A_AN.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
 		
 		# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
 		# Basically, though, can use the indel translation function (keep the exon with the variant and everything that comes after) for all of them except the ones where the exon boundaries are both new, in which case we need to do all six reading frames. And we saved those...where? notA?
+		# Single frame translations
+		translate(results_folder+"/log/", "alternative.bed.dna")
+		translate(results_folder+"/log/", "alternative_frameshift.bed.dna")
+		# Six-frame translations
+		#translate_six_frame()
+		write_to_status("Translated alternative-splice junctions")
