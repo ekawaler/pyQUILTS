@@ -55,10 +55,13 @@ def parse_input_arguments():
 	# full paths are a pain but they're more flexible.
 	# Also, at some point, make some of these arguments not optional.
 	parser = argparse.ArgumentParser(description="QUILTS") # What even is this description for, anyway? Maybe I'll remove it eventually
-	parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts",
+	#parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts",
 		help="full path to output folder")
-	parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20160914", help="full path to folder containing reference proteome")
-	parser.add_argument('--genome', type=str, default="/ifs/data/proteomics/tcga/databases/genome_human", help="full path to folder containing reference genome")
+	#parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20160914", help="full path to folder containing reference proteome")
+	#parser.add_argument('--genome', type=str, default="/ifs/data/proteomics/tcga/databases/genome_human", help="full path to folder containing reference genome")
+	parser.add_argument('--output_dir', type=str, default=".", help="full path to output folder")
+	parser.add_argument('--proteome', type=str, default=".", help="full path to folder containing reference proteome")
+	parser.add_argument('--genome', type=str, default=".", help="full path to folder containing reference genome")
 	#parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna/vcf/TCGA-20130502-S", help="VCF file of somatic variants")
 	#parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna-germline/vcf/GATK26-G-Nature", help="VCF file of germline variants")
 	#parser.add_argument('--junction', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/rna/tophat/junction_tophat208bowtie2_gMx", help="BED file of splice junctions [in progress]")
@@ -1376,7 +1379,7 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 			key = "%s#%d#%d" % (chr, begin_intron, end_intron)
 			# This apparently never executes. But why?
 			if key in junctions_model.keys():
-				print "Actually it totally does execute, dorkus %s" % key
+				#print "Actually it totally does execute, dorkus %s" % key
 				junc_status = "C"
 				N = False
 			else:
@@ -1533,7 +1536,7 @@ def truncated_exon(prot_info, models, end_intron, num_observ, start_exon_2, thre
 				# Not within the same gene
 				# I think nothing happens if this occurs.
 				# Move to next protein.
-				print "OH NO %d %d" % (end_intron, end)
+				#print "OH NO %d %d" % (end_intron, end)
 				continue
 			outside = False
 			block_count_ = 0
@@ -1735,6 +1738,16 @@ def translate_junctions(input_file):
 	f.close()
 	tryp_fasta.close()
 
+### This function is used at the end to combine all of the output fasta files into one.
+
+def combine_output_fastas(out_dir):
+	'''Combines all of the fastas in the output directory into one'''
+	files = os.listdir(out_dir+'parts/')
+	for f in files:
+		if f.endswith('.fasta'):
+			with open(out_dir+'parts/'+f,'r') as src:
+				with open(out_dir+"proteome.fasta", 'a') as dest:
+					shutil.copyfileobj(src, dest)
 
 ### These functions are used everywhere.
 
@@ -1842,6 +1855,8 @@ if __name__ == "__main__":
 		write_to_status("Translated SAAVs")	
 		translate(results_folder+"/log/", "proteome.indel.var.bed.dna")
 		write_to_status("Translated indels")
+		shutil.copy(results_folder+"/log/proteome.aa.var.bed.dna.fasta", results_folder+"/fasta/parts/proteome.aa.fasta")
+		shutil.copy(results_folder+"/log/proteome.indel.var.bed.dna.fasta", results_folder+"/fasta/parts/proteome.indel.fasta")
 
 		# Time for tryptic peptides! Remember: C-term (after) K/R residues
 		make_aa_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
@@ -1929,4 +1944,12 @@ if __name__ == "__main__":
 		translate(results_folder+"/log/", "alternative_frameshift.bed.dna")
 		# Six-frame translations
 		#translate_six_frame()
+		
+		# Move junctions to results folder
+		shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
+		shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
 		write_to_status("Translated alternative-splice junctions")
+		
+		# Combine all of the proteome parts into one.
+		combine_output_fastas(results_folder+'/fasta/')
+		write_to_status("DONE")
