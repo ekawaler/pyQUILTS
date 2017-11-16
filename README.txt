@@ -1,7 +1,7 @@
 Welcome to the alpha version of QUILTS 3.0! This version of QUILTS is able to find variants (both single amino acid variants and indels) and most forms of splice junctions, though the junction functionality has not been extensively tested, so use at your own risk.
 
 TO RUN:
-The required arguments are ‘output_dir’, ’genome’, and ‘proteome’. Also must have one or more of ‘somatic’, ‘germline’, and ‘junction’. An example genome and proteome (HG19, RefSeq from September 22, 2017) can be downloaded from https://nyumc.box.com/v/quilts-sample-references (please let me know if this link doesn’t work). To create your own refSeq proteome, go into the refSeq folder and follow the instructions in the README there. (Genome creation instructions forthcoming.) You can also look at the sample running script included as runtest.sh (though it won’t run until you change the paths to reflect where the files are located on your system).
+The required arguments are ‘output_dir’, ’genome’, and ‘proteome’. Also must have one or more of ‘somatic’, ‘germline’, and ‘junction’. An example genome and proteome (HG19, RefSeq from September 22, 2017) can be downloaded from https://nyumc.box.com/v/quilts-sample-references (please let me know if this link doesn’t work). To create your own refSeq proteome, go into the refSeq folder and follow the instructions in the README there. To create your own genome, go into the prepare_genome folder and follow the instructions in the README there. You can also look at the sample running script included as runtest.sh (though it won’t run until you change the paths to reflect where the files are located on your system).
 
 python quilts.py
 	—-output_dir (path to the desired location of the results)
