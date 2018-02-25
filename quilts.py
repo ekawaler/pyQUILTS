@@ -55,8 +55,7 @@ def parse_input_arguments():
 	# full paths are a pain but they're more flexible.
 	# Also, at some point, make some of these arguments not optional.
 	parser = argparse.ArgumentParser(description="QUILTS") # What even is this description for, anyway? Maybe I'll remove it eventually
-	#parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts",
-		help="full path to output folder")
+	#parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts", help="full path to output folder")
 	#parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20160914", help="full path to folder containing reference proteome")
 	#parser.add_argument('--genome', type=str, default="/ifs/data/proteomics/tcga/databases/genome_human", help="full path to folder containing reference genome")
 	parser.add_argument('--output_dir', type=str, default=".", help="full path to output folder")
@@ -200,14 +199,16 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 	# Cool, we have a valid file, let's open our log and output files.
 	vcf_log_location = vcf_dir+'/merged_pytest/merged.log'
 	vcf_log = open(vcf_log_location,'w')
-	w = open(vcf_dir+'/merged_pytest/merged.vcf','w')	
+	w = open(vcf_dir+'/merged_pytest/merged.vcf','w')
+	w.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\n")	
+	
 
 	# Set up some tracking stats etc.
 	qual_removed_all = 0
 	total_variants_all = 0
 	kept_variants_all = 0
 	duplicates_all = 0
-	header_written = False
+	#header_written = False
 	existing_variants = {}
 
 	for vf in vcf_files:
@@ -225,9 +226,16 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 		old_duplicates_removed = 0 # Duplicates in this file that were higher-quality than older duplicates
 		while line:
 			spline = line.split('\t')
+			if line[0] == '#':
+				# It's a header line. Ignore it.
+				#if not header_written:
+				#	w.write('\t'.join(spline[0:6])+'\n')
+				#	header_written = True
+				line = f.readline()
+				continue
 			if len(spline) < 6:
 				# Bummer, we don't have six tab-separated fields, this isn't a valid VCF line
-				write_to_log("Error parsing: "+line, vcf_log_location)
+				write_to_log("Error parsing: ", vcf_log_location)
 				line = f.readline()
 				continue
 			if spline[4] == '.':
@@ -235,12 +243,6 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 				# This hasn't been tested too rigorously because it didn't appear in any of my test data,
 				# but someone else had some of these so I had him insert this and it seemed to work for him.
 				#write_to_log("No variant: "+line, vcf_log_location) # Uncomment this if you want to write these lines to the log for testing
-				line = f.readline()
-				continue
-			if line[0] == '#':
-				# It's a header line. Write it as-is to the file if it's the first file.
-				if not header_written:
-					w.write('\t'.join(spline[0:6])+'\n')
 				line = f.readline()
 				continue
 
@@ -283,7 +285,7 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 			line = f.readline()
 
 		# Add everything up and write a status line to the log
-		header_written = True # Don't want to write a header unless it's the first file
+		#header_written = True # Don't want to write a header unless it's the first file
 		qual_removed_all += qual_removed
 		total_variants_all += total_variants
 		kept_variants_all += kept_variants
@@ -500,6 +502,9 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		if triplet_orig == '':
 			print '\n'+'Empty codon: '+var, full_seq, len(full_seq), triplet_start, header_line
 			continue
+		if len(triplet_orig) != 3:
+			print '\n'+'Triplet with length <3 (length of sequence likely not divisible by 3, for whatever reason): '+var, full_seq, len(full_seq), triplet_start, header_line
+			continue
 		subst_pos = pos%3
 		triplet_new = triplet_orig[:subst_pos] + triplet_subst + triplet_orig[subst_pos+1:] # This did! change it in both.
 		# If it's the reverse strand, check the reversed and translated triplet instead
@@ -663,13 +668,15 @@ def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, ou
 				chunk_pos = indel_pos-seq_length
 				# What to do in this eventuality? 
 				# Because the deletion extends into the intron and not the next exon, just ignore it and make sure you edit the length appropriately.
-				if chunk_pos+len(to_delete) > chunk_length:
-					write_to_status("Found a deletion that goes beyond the exon. %s\t%s" % (ex_head[0], indel))
 				seq_chunk = orig_seq_chunk[:chunk_pos]+to_insert+orig_seq_chunk[chunk_pos+len(to_delete):]
 				if chunk_pos+len(to_delete) <= chunk_length:
 					new_length = chunk_length-len(to_delete)+len(to_insert)
 				else:
 					new_length = chunk_pos+1 # adds one for the base we're adding back in
+					try:
+						write_to_status("Found a deletion that goes beyond the exon. %s\t%s" % (ex_head[0], indel))
+					except OSError:
+						print "Found a very strange deletion: " + '\t'.join(ex_head) + '\t' + indel
 				tmp_ex_head = ex_head
 				tmp_ex_head[4] = str(new_length)
 				ex_head_to_write = '\t'.join(tmp_ex_head)
@@ -788,7 +795,7 @@ def sort_variants(proteome_file, variant_file, output_prefix):
 	
 ### These functions are used to translate DNA variants into variant proteins.
 
-def translate_seq(sequence, strand):
+def translate_seq(sequence, strand, return_all = False):
 	'''Translates a DNA sequence to an AA sequence'''
 	global codon_map
 	
@@ -815,7 +822,11 @@ def translate_seq(sequence, strand):
 	
 	# Now this should return the translated sequence up to the first stop codon.	
 	# That could either be at the actual end of the sequence, or at a variant that adds a stop.
-	return translated.split('*')[0]
+	if return_all:
+		# In some cases, I want to return the whole sequence, including internal stops.
+		return translated
+	else:
+		return translated.split('*')[0]
 
 def translate(log_dir, bed_file):
 	'''Reads in a bed.dna file and translates it to a protein .fasta file.'''
@@ -897,13 +908,17 @@ def translate(log_dir, bed_file):
 
 ### These functions are used to make the peptide fasta files.
 
-def trypsinize(sequence, pos = 0):
+def trypsinize(sequence, pos = 0, end_pos = False, allow_missed_cleavage = False):
 	'''Virtually trypsinizes a protein and returns its tryptic peptides. 
-	If a position is given, it only returns the peptides following that position (used for indels
-	and splice junctions, where anything before the variant is unchanged).
+	If a position is given, it only returns the peptides following that AA position (used for indels
+	and splice junctions, where anything before the variant is unchanged). Also can specify an end_pos.
 	Right now, just chops it after any K or R that isn't followed by a P.'''
+	if not end_pos:
+		end_pos = len(sequence)
+	break_next_flag = False # Says we've found the end of our desired sequence and want to keep one more peptide (in case of missed cleavage)
 	tryptic_peptides = []
 	seq = ''
+	prev_peptide = (0,'*')
 	for i in range(len(sequence)):
 		letter = sequence[i]
 		seq += letter
@@ -911,11 +926,25 @@ def trypsinize(sequence, pos = 0):
 			next_letter = sequence[i+1]
 		except IndexError:
 			next_letter = '*'
-		if (letter == 'K' or letter == 'R') and next_letter != 'P':
+		if ((letter == 'K' or letter == 'R') and next_letter != 'P') or letter == '*': #should only find a stop codon if we're passing it a fully-translated sequence including stops, as in junctions
+			if pos <= i and prev_peptide[0] < pos and allow_missed_cleavage: 
+				# This is the first peptide of our desired sequence. Keep the previous one around in case of missed cleavage.
+				if prev_peptide[1][-1] != '*':  # If it ends in a stop codon we don't want it
+					tryptic_peptides.append(prev_peptide[1])
 			if pos <= i:
 				tryptic_peptides.append(seq)
+			prev_peptide = (i,seq) # Reset the previous peptide and its end position
 			seq = ''
-	if seq != '':
+			if break_next_flag:
+				# We just added a peptide after the end of our desired sequence and can now finish
+				break_next_flag = False
+				break
+			if i >= end_pos:
+				if not allow_missed_cleavage or prev_peptide[1][-1] == '*':
+					break
+				else:
+					break_next_flag = True
+	if seq != '' and pos <= i:
 		tryptic_peptides.append(seq)
 	return tryptic_peptides
 
@@ -1125,11 +1154,11 @@ def make_indel_peptide_fasta(log_dir, logfile):
 ### These functions are used to merge junction files.
 
 def pull_junc_files(junc_dir):
-	'''Finds all *junctions.bed files in the directory.'''
+	'''Finds all *.bed files in the directory.'''
 	files = os.listdir(junc_dir)
 	junc_files = []
 	for f in files:
-		if f.endswith('junctions.bed'):
+		if f.endswith('.bed'):
 			junc_files.append(f)
 	return junc_files
 
@@ -1150,7 +1179,7 @@ def merge_junction_files(junc_dir, log_dir):
 		return 1
 	junc_files = pull_junc_files(junc_dir)
 	if len(junc_files) == 0:
-		warnings.warn("Unable to find any *junctions.bed files in %s." % junc_dir)
+		warnings.warn("Unable to find any .bed files in %s." % junc_dir)
 		return 1
 	
 	for file in junc_files:
@@ -1162,7 +1191,7 @@ def merge_junction_files(junc_dir, log_dir):
 		for line in f.readlines():
 			spline = line.split()
 			if len(spline) > 11:
-				chrm, begin_ex_1, end_ex_2, junc_num, num_observ, len_exons, begin_exons = spline[0], int(spline[1]), int(spline[2]), spline[3], int(spline[4]), spline[10], spline[11]
+				chrm, begin_ex_1, end_ex_2, junc_num, num_observ, len_exons, begin_exons = spline[0], int(spline[1]), int(spline[2]), spline[3], int(spline[4]), spline[10].rstrip(','), spline[11].rstrip(',')
 				splen_exons = map(int,len_exons.split(','))
 				spbegin_exons = map(int,begin_exons.split(','))
 				begin_intron = begin_ex_1 + splen_exons[0] + 1
@@ -1620,7 +1649,7 @@ def elongated_exon(prot_info, models, begin_intron, num_observ, start_exon_2, th
 				# I think nothing happens if this occurs.
 				# Move to next protein.
 				#outside = False
-				print "OH NO %s %d %d %d" % (protein, alt2, start, begin_intron)
+				#print "OH NO %s %d %d %d" % (protein, alt2, start, begin_intron)
 				continue
 			outside = False
 			block_count_ = 0
@@ -1699,44 +1728,124 @@ def elongated_exon(prot_info, models, begin_intron, num_observ, start_exon_2, th
 
 ### These functions are used to translate junction files.
 
-
-def translate_junctions(input_file):
+def translate_novels(log_dir, bed_file):
 	'''Main function for adding non-frameshifted junctions to the tryptic peptide fasta.
 	Basically, add the peptide that includes the junction and everything that comes after it.
 	Later: maybe remove the parts that come after it if it isn't frameshifted? That might be complicated.
 	NOT FINISHED'''
-	# Grab the indel variants
-	vars = {}
-	f = open(input_file,'r')
-	tryp_fasta = open(log_dir+'tryptic_proteome.fasta','a') # will append to the file
+	# Get the descriptions
+	desc = {}
+	f = open(log_dir+"proteome-descriptions.txt",'r')
 	line = f.readline()
 	while line:
-		indel = line.split()[-1].split(':')[0]
-		gene = line.split()[0]
-		nt_pos = int(re.findall(r'\d+', indel)[0]) # The DNA position, starting from zero
-		strand = line.split()[1][-1]
-		to_delete = indel.split(str(nt_pos))[0].split('-')[1]
-		to_insert = indel.split(str(nt_pos))[1]
-		seq = f.readline().rstrip() # Next line is the sequence
-		if strand == '+':
-			aa_pos = nt_pos/3 # Again, indexes from zero
-		else:
-			aa_pos = len(seq) - nt_pos/3
-		tryptic_peptides = trypsinize(seq, aa_pos)
-		if (len(to_insert) - len(to_delete))%3 == 0: # no change in frame, so only the indel is changed
-			if len(tryptic_peptides) > 0:
-				tryptic_peptides = [tryptic_peptides[0]]
-			else:
-				write_to_log("No tryptic peptides: %s, %s, %s, %s" % (gene[1:], indel, seq, strand), logfile)
-		for i in range(len(tryptic_peptides)):
-			tp = tryptic_peptides[i]
-			if 25 >= len(tp) >= 6:
-				tryp_fasta.write("%s\tPeptide %d\n" % (line.rstrip(), i))
-				tryp_fasta.write("%s\n" % tp)
-		line = f.readline() # Next line is the header
-	
+		spline = line.rstrip().split('\t')
+		desc[spline[0]] = spline[1]
+		line = f.readline()
 	f.close()
-	tryp_fasta.close()
+	# Get the gene abbreviations
+	abbr = {}
+	f = open(log_dir+"proteome-genes.txt",'r')
+	line = f.readline()
+	while line:
+		spline = line.rstrip().split()
+		abbr[spline[0]] = spline[-1]
+		line = f.readline()
+	f.close()
+	
+	# The rest of it
+	f = open(log_dir+bed_file,'r')
+	out_fasta = open(log_dir+bed_file+".fasta",'w') # The original QUILTS writes two other files but they're just duplicates of proteome.aa.var.bed and proteome.aa.var.bed.dna, it seems. For now I'm leaving them out.
+	line = f.readline()
+	sequence = ""
+	prev_AA_subst = []
+	prev_gene = ''
+	while line:
+		# Line type one: First gene header line
+		if line[:3] == 'chr':
+			# Finish processing the previous gene - focus first on proteome.bed.aa.var
+			# Using a try/except block here to deal with the possibility of this being the first line
+			# There has to be a more graceful way to do that, right?
+			try:
+				if prev_gene != gene:
+					prev_AA_subst = []
+				if AA_subst not in prev_AA_subst:
+					for i in range(3): # Gotta get rid of the 600 preceding
+						translated = translate_seq(sequence.upper()[i:], '+', True)
+						if i==1:
+							# The splice happens between codons
+							tryp = trypsinize(translated, 215, 216, True) # this math may be bad
+						else:
+							# The splice happens in the middle of a codon
+							tryp = trypsinize(translated, 216, 216, True) # this math may be bad
+						to_write = ''.join(tryp).rstrip('*')
+						if '>NP_001299602-AN2-3-3' in second_header:
+							print translated, tryp, to_write, translated[214:216]
+						if len(to_write) > 6:
+							out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
+							out_fasta.write(to_write+'\n')
+						translated = translate_seq(sequence.upper()[:-3-i], '-', True)
+						if i==2:
+							# Splice happens between codons
+							tryp = trypsinize(translated, 214, 215, True) # this math may be bad
+						else:
+							# Splice happens in the middle of a codon
+							tryp = trypsinize(translated, 215, 215, True) # this math may be bad
+						to_write = ''.join(tryp).rstrip('*')
+						if '>NP_001299602-AN2-3-3' in second_header:
+							print translated, tryp, to_write, translated[214:216]
+						if len(to_write) > 6:
+							out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
+							out_fasta.write(to_write+'\n')
+				prev_AA_subst.append(AA_subst)
+				prev_gene = gene
+			except UnboundLocalError:
+				pass
+			# Start processing the new gene
+			sequence = ""
+			strand = line.split('\t')[5]
+			gene = line.split('\t')[3].split('-')[0]
+		# Line type two: Second gene header line
+		elif line[0] == '>':
+			second_header = line # This will be the header in the fasta file
+			AA_subst = line.rsplit('-',1)[-1].split(':')[0]
+		# Line type three: Exon line (can be pre-100, post-100 or internal)
+		else:
+			spline = line.rstrip().split('\t')
+			# Here we want to keep both the preceding and ...anteceding? sequence chunks
+			sequence += spline[-1]
+		line = f.readline()
+		
+	# And finish the last one
+	try:
+		if prev_gene != gene or AA_subst != prev_AA_subst:
+			for i in range(3): # Gotta get rid of the 600 preceding
+				translated = translate_seq(sequence.upper()[i:], '+', True)
+				if i==1:
+					# The splice happens between codons
+					tryp = trypsinize(translated, 215, 216, True) # this math may be bad
+				else:
+					# The splice happens in the middle of a codon
+					tryp = trypsinize(translated, 216, 216, True) # this math may be bad
+				to_write = ''.join(tryp).rstrip('*')	
+				if len(to_write) > 6:
+					out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
+					out_fasta.write(to_write+'\n')
+				translated = translate_seq(sequence.upper()[:-3-i], '-', True)
+				if i==2:
+					# Splice happens between codons
+					tryp = trypsinize(translated, 214, 215, True) # this math may be bad
+				else:
+					# Splice happens in the middle of a codon
+					tryp = trypsinize(translated, 215, 215, True) # this math may be bad
+				to_write = ''.join(tryp).rstrip('*')
+				if len(to_write) > 6:
+					out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
+					out_fasta.write(to_write+'\n')
+	except UnboundLocalError:
+		pass
+
+	f.close()
+	out_fasta.close()
 
 ### This function is used at the end to combine all of the output fasta files into one.
 
@@ -1882,9 +1991,10 @@ if __name__ == "__main__":
 			args.junction = None
 		quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
 		filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)
-		shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
+		#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
 		filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
 		write_to_status("Filtered alternative splices into the appropriate types.")
+		
 		# Make a fasta out of the alternative splices with conserved exon boundaries
 		write_to_status("About to do a read_chr_bed")
 		try:
@@ -1936,6 +2046,16 @@ if __name__ == "__main__":
 			shutil.copy(results_folder+'/log/merged-junctions.filter.A_AN.bed.dna', results_folder+'/log/alternative_frameshift.bed.dna')
 		except CalledProcessError:
 			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A_AN.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
+		write_to_status("Done with read_chr_bed to create alternative_frameshift.bed.dna")
+			
+		# Now to tackle the novels...
+		write_to_status("About to do a read_chr_bed")
+		try:
+			check_call("%s/read_chr_bed %s/log/merged-junctions.filter.notA.bed %s" % (script_dir, results_folder, args.genome), shell=True)
+			shutil.copy(results_folder+'/log/merged-junctions.filter.notA.bed.dna', results_folder+'/log/novel_splices.bed.dna')
+		except CalledProcessError:
+			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.notA.bed.dna file. Will not have a fasta file of novel spliceforms.")
+		write_to_status("Done with read_chr_bed to create novel_splices.bed.dna")
 		
 		# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
 		# Basically, though, can use the indel translation function (keep the exon with the variant and everything that comes after) for all of them except the ones where the exon boundaries are both new, in which case we need to do all six reading frames. And we saved those...where? notA?
@@ -1943,13 +2063,14 @@ if __name__ == "__main__":
 		translate(results_folder+"/log/", "alternative.bed.dna")
 		translate(results_folder+"/log/", "alternative_frameshift.bed.dna")
 		# Six-frame translations
-		#translate_six_frame()
+		shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/results_20171116.144632/log/novel_splices.bed.dna', results_folder+'/log/novel_splices.bed.dna')
+		translate_novels(results_folder+"/log/", "novel_splices.bed.dna")
 		
 		# Move junctions to results folder
-		shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
-		shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
-		write_to_status("Translated alternative-splice junctions")
+		#shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
+		#shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
+		#write_to_status("Translated alternative-splice junctions")
 		
-		# Combine all of the proteome parts into one.
-		combine_output_fastas(results_folder+'/fasta/')
-		write_to_status("DONE")
+	# Combine all of the proteome parts into one.
+	combine_output_fastas(results_folder+'/fasta/')
+	write_to_status("DONE")
