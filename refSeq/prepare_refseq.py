@@ -1,3 +1,9 @@
+import argparse
+import shutil
+
+parser = argparse.ArgumentParser(description="Prepare Proteome Reference")
+
+
 f = open('refLink.txt','r')
 genes = open('proteome-genes.txt','w')
 descriptions = open('proteome-descriptions.txt','w')
@@ -12,7 +18,7 @@ f.close()
 genes.close()
 descriptions.close()
 
-f = open('refgene.bed','r')
+f = open('refSeq.bed','r')
 w = open('proteome.bed','w')
 
 for line in f.readlines():
@@ -60,3 +66,7 @@ for line in f.readlines():
 
 f.close()
 w.close()
+
+# I'm using "copy" here instead of "move" in case someone wants to run this again and 
+# doesn't remember where their refSeq.bed went.
+shutil.copy('refSeq.bed','transcriptome.bed')
