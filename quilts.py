@@ -1235,7 +1235,7 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 		line_number = 0 # Might never get used
 		for line in f.readlines():
 			spline = line.split('\t')
-			chrm, begin_exon, protein, strand, block_count, block_sizes, block_starts = spline[0], int(spline[1]), spline[3], spline[5], int(spline[9]), spline[10], spline[11]
+			chrm, begin_exon, protein, strand, block_count, block_sizes, block_starts = spline[0], int(spline[1]), spline[3], spline[5], int(spline[9]), spline[10].rstrip(','), spline[11].rstrip(',')
 			sizes = map(int, block_sizes.split(','))
 			starts = map(int, block_starts.split(','))
 			start = begin_exon
