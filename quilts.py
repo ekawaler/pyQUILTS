@@ -1191,7 +1191,7 @@ def merge_junction_files(junc_dir, log_dir):
 		for line in f.readlines():
 			spline = line.split()
 			if len(spline) > 11:
-				chrm, begin_ex_1, end_ex_2, junc_num, num_observ, len_exons, begin_exons = spline[0], int(spline[1]), int(spline[2]), spline[3], int(spline[4]), spline[10].rstrip(','), spline[11].rstrip(',')
+				chrm, begin_ex_1, end_ex_2, junc_num, num_observ, len_exons, begin_exons = spline[0], int(spline[1]), int(spline[2]), spline[3], int(spline[4]), spline[10].rstrip(','), spline[11].rstrip().rstrip(',')
 				splen_exons = map(int,len_exons.split(','))
 				spbegin_exons = map(int,begin_exons.split(','))
 				begin_intron = begin_ex_1 + splen_exons[0] + 1
@@ -1235,7 +1235,7 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 		line_number = 0 # Might never get used
 		for line in f.readlines():
 			spline = line.split('\t')
-			chrm, begin_exon, protein, strand, block_count, block_sizes, block_starts = spline[0], int(spline[1]), spline[3], spline[5], int(spline[9]), spline[10].rstrip(','), spline[11].rstrip(',')
+			chrm, begin_exon, protein, strand, block_count, block_sizes, block_starts = spline[0], int(spline[1]), spline[3], spline[5], int(spline[9]), spline[10].rstrip(','), spline[11].rstrip().rstrip(',')
 			sizes = map(int, block_sizes.split(','))
 			starts = map(int, block_starts.split(','))
 			start = begin_exon
