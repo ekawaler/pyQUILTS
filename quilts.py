@@ -828,7 +828,7 @@ def translate_seq(sequence, strand, return_all = False):
 	else:
 		return translated.split('*')[0]
 
-def translate(log_dir, bed_file):
+def translate(log_dir, bed_file, logfile):
 	'''Reads in a bed.dna file and translates it to a protein .fasta file.'''
 	# Get the descriptions
 	desc = {}
@@ -862,17 +862,20 @@ def translate(log_dir, bed_file):
 			# Finish processing the previous gene - focus first on proteome.bed.aa.var
 			# Using a try/except block here to deal with the possibility of this being the first line
 			# There has to be a more graceful way to do that, right?
-			try:
-				if prev_gene != gene:
-					prev_AA_subst = []
-				if AA_subst not in prev_AA_subst:
-					translated = translate_seq(sequence.upper(), strand)
-					out_fasta.write(second_header)
-					out_fasta.write(translated+'\n')
-				prev_AA_subst.append(AA_subst)
-				prev_gene = gene
-			except UnboundLocalError:
-				pass
+			if "Error Reading Sequence" in sequence: # This error comes from read_chr_bed, which I did not write and am afraid to touch.
+				write_to_log("Error in sequence for %s. Skipping..." % gene, logfile)
+			else:
+				try:
+					if prev_gene != gene:
+						prev_AA_subst = []
+					if AA_subst not in prev_AA_subst:
+						translated = translate_seq(sequence.upper(), strand)
+						out_fasta.write(second_header)
+						out_fasta.write(translated+'\n')
+					prev_AA_subst.append(AA_subst)
+					prev_gene = gene
+				except UnboundLocalError:
+					pass
 			# Start processing the new gene
 			sequence = ""
 			strand = line.split('\t')[5]
@@ -895,13 +898,16 @@ def translate(log_dir, bed_file):
 		line = f.readline()
 		
 	# And finish the last one
-	try:
-		if prev_gene != gene or AA_subst != prev_AA_subst:
-			translated = translate_seq(sequence.upper(), strand)
-			out_fasta.write(second_header)
-			out_fasta.write(translated+'\n')
-	except UnboundLocalError:
-		pass
+	if "Error Reading Sequence" in sequence:
+		write_to_log("Error in sequence for %s. Skipping..." % logfile)
+	else:
+		try:
+			if prev_gene != gene or AA_subst != prev_AA_subst:
+				translated = translate_seq(sequence.upper(), strand)
+				out_fasta.write(second_header)
+				out_fasta.write(translated+'\n')
+		except UnboundLocalError:
+			pass
 
 	f.close()
 	out_fasta.close()
@@ -1728,7 +1734,7 @@ def elongated_exon(prot_info, models, begin_intron, num_observ, start_exon_2, th
 
 ### These functions are used to translate junction files.
 
-def translate_novels(log_dir, bed_file):
+def translate_novels(log_dir, bed_file, logfile):
 	'''Main function for adding non-frameshifted junctions to the tryptic peptide fasta.
 	Basically, add the peptide that includes the junction and everything that comes after it.
 	Later: maybe remove the parts that come after it if it isn't frameshifted? That might be complicated.
@@ -1765,41 +1771,44 @@ def translate_novels(log_dir, bed_file):
 			# Finish processing the previous gene - focus first on proteome.bed.aa.var
 			# Using a try/except block here to deal with the possibility of this being the first line
 			# There has to be a more graceful way to do that, right?
-			try:
-				if prev_gene != gene:
-					prev_AA_subst = []
-				if AA_subst not in prev_AA_subst:
-					for i in range(3): # Gotta get rid of the 600 preceding
-						translated = translate_seq(sequence.upper()[i:], '+', True)
-						if i==1:
-							# The splice happens between codons
-							tryp = trypsinize(translated, 215, 216, True) # this math may be bad
-						else:
-							# The splice happens in the middle of a codon
-							tryp = trypsinize(translated, 216, 216, True) # this math may be bad
-						to_write = ''.join(tryp).rstrip('*')
-						if '>NP_001299602-AN2-3-3' in second_header:
-							print translated, tryp, to_write, translated[214:216]
-						if len(to_write) > 6:
-							out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
-							out_fasta.write(to_write+'\n')
-						translated = translate_seq(sequence.upper()[:-3-i], '-', True)
-						if i==2:
-							# Splice happens between codons
-							tryp = trypsinize(translated, 214, 215, True) # this math may be bad
-						else:
-							# Splice happens in the middle of a codon
-							tryp = trypsinize(translated, 215, 215, True) # this math may be bad
-						to_write = ''.join(tryp).rstrip('*')
-						if '>NP_001299602-AN2-3-3' in second_header:
-							print translated, tryp, to_write, translated[214:216]
-						if len(to_write) > 6:
-							out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
-							out_fasta.write(to_write+'\n')
-				prev_AA_subst.append(AA_subst)
-				prev_gene = gene
-			except UnboundLocalError:
-				pass
+			if "Error Reading Sequence" in sequence: # This error comes from read_chr_bed, which I did not write and am afraid to touch.
+				write_to_log("Error in sequence for %s. Skipping..." % gene, logfile)
+			else:
+				try:
+					if prev_gene != gene:
+						prev_AA_subst = []
+					if AA_subst not in prev_AA_subst:
+						for i in range(3): # Gotta get rid of the 600 preceding
+							translated = translate_seq(sequence.upper()[i:], '+', True)
+							if i==1:
+								# The splice happens between codons
+								tryp = trypsinize(translated, 215, 216, True) # this math may be bad
+							else:
+								# The splice happens in the middle of a codon
+								tryp = trypsinize(translated, 216, 216, True) # this math may be bad
+							to_write = ''.join(tryp).rstrip('*')
+							if '>NP_001299602-AN2-3-3' in second_header:
+								print translated, tryp, to_write, translated[214:216]
+							if len(to_write) > 6:
+								out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
+								out_fasta.write(to_write+'\n')
+							translated = translate_seq(sequence.upper()[:-3-i], '-', True)
+							if i==2:
+								# Splice happens between codons
+								tryp = trypsinize(translated, 214, 215, True) # this math may be bad
+							else:
+								# Splice happens in the middle of a codon
+								tryp = trypsinize(translated, 215, 215, True) # this math may be bad
+							to_write = ''.join(tryp).rstrip('*')
+							if '>NP_001299602-AN2-3-3' in second_header:
+								print translated, tryp, to_write, translated[214:216]
+							if len(to_write) > 6:
+								out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
+								out_fasta.write(to_write+'\n')
+					prev_AA_subst.append(AA_subst)
+					prev_gene = gene
+				except UnboundLocalError:
+					pass
 			# Start processing the new gene
 			sequence = ""
 			strand = line.split('\t')[5]
@@ -1816,33 +1825,36 @@ def translate_novels(log_dir, bed_file):
 		line = f.readline()
 		
 	# And finish the last one
-	try:
-		if prev_gene != gene or AA_subst != prev_AA_subst:
-			for i in range(3): # Gotta get rid of the 600 preceding
-				translated = translate_seq(sequence.upper()[i:], '+', True)
-				if i==1:
-					# The splice happens between codons
-					tryp = trypsinize(translated, 215, 216, True) # this math may be bad
-				else:
-					# The splice happens in the middle of a codon
-					tryp = trypsinize(translated, 216, 216, True) # this math may be bad
-				to_write = ''.join(tryp).rstrip('*')	
-				if len(to_write) > 6:
-					out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
-					out_fasta.write(to_write+'\n')
-				translated = translate_seq(sequence.upper()[:-3-i], '-', True)
-				if i==2:
-					# Splice happens between codons
-					tryp = trypsinize(translated, 214, 215, True) # this math may be bad
-				else:
-					# Splice happens in the middle of a codon
-					tryp = trypsinize(translated, 215, 215, True) # this math may be bad
-				to_write = ''.join(tryp).rstrip('*')
-				if len(to_write) > 6:
-					out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
-					out_fasta.write(to_write+'\n')
-	except UnboundLocalError:
-		pass
+	if "Error Reading Sequence" in sequence: # This error comes from read_chr_bed, which I did not write and am afraid to touch.
+		write_to_log("Error in sequence for %s. Skipping..." % gene, logfile)
+	else:
+		try:
+			if prev_gene != gene or AA_subst != prev_AA_subst:
+				for i in range(3): # Gotta get rid of the 600 preceding
+					translated = translate_seq(sequence.upper()[i:], '+', True)
+					if i==1:
+						# The splice happens between codons
+						tryp = trypsinize(translated, 215, 216, True) # this math may be bad
+					else:
+						# The splice happens in the middle of a codon
+						tryp = trypsinize(translated, 216, 216, True) # this math may be bad
+					to_write = ''.join(tryp).rstrip('*')	
+					if len(to_write) > 6:
+						out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
+						out_fasta.write(to_write+'\n')
+					translated = translate_seq(sequence.upper()[:-3-i], '-', True)
+					if i==2:
+						# Splice happens between codons
+						tryp = trypsinize(translated, 214, 215, True) # this math may be bad
+					else:
+						# Splice happens in the middle of a codon
+						tryp = trypsinize(translated, 215, 215, True) # this math may be bad
+					to_write = ''.join(tryp).rstrip('*')
+					if len(to_write) > 6:
+						out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
+						out_fasta.write(to_write+'\n')
+		except UnboundLocalError:
+			pass
 
 	f.close()
 	out_fasta.close()
@@ -1960,9 +1972,9 @@ if __name__ == "__main__":
 		write_to_status("Variants sorted")	
 
 		# Translate the variant sequences into a fasta file.
-		translate(results_folder+"/log/", "proteome.aa.var.bed.dna")
+		translate(results_folder+"/log/", "proteome.aa.var.bed.dna", logfile)
 		write_to_status("Translated SAAVs")	
-		translate(results_folder+"/log/", "proteome.indel.var.bed.dna")
+		translate(results_folder+"/log/", "proteome.indel.var.bed.dna", logfile)
 		write_to_status("Translated indels")
 		shutil.copy(results_folder+"/log/proteome.aa.var.bed.dna.fasta", results_folder+"/fasta/parts/proteome.aa.fasta")
 		shutil.copy(results_folder+"/log/proteome.indel.var.bed.dna.fasta", results_folder+"/fasta/parts/proteome.indel.fasta")
@@ -2060,11 +2072,11 @@ if __name__ == "__main__":
 		# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
 		# Basically, though, can use the indel translation function (keep the exon with the variant and everything that comes after) for all of them except the ones where the exon boundaries are both new, in which case we need to do all six reading frames. And we saved those...where? notA?
 		# Single frame translations
-		translate(results_folder+"/log/", "alternative.bed.dna")
-		translate(results_folder+"/log/", "alternative_frameshift.bed.dna")
+		translate(results_folder+"/log/", "alternative.bed.dna", logfile)
+		translate(results_folder+"/log/", "alternative_frameshift.bed.dna", logfile)
 		# Six-frame translations
 		shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/results_20171116.144632/log/novel_splices.bed.dna', results_folder+'/log/novel_splices.bed.dna')
-		translate_novels(results_folder+"/log/", "novel_splices.bed.dna")
+		translate_novels(results_folder+"/log/", "novel_splices.bed.dna", logfile)
 		
 		# Move junctions to results folder
 		#shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
