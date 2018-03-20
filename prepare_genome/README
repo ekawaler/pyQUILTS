@@ -1,6 +1,8 @@
-1. Download *chr*.fa.gz files from ftp://ftp.ncbi.nlm.nih.gov/genomes/H_sapiens/Assembled_chromosomes/seq/
-2. Run perl gunzip_dir.pl <path to folder with your .fa.gz files>
-3. Run perl compress_chr_dir.pl <path to folder with your .fa files>
+In order to generate the .cmp1 files QUILTS uses:
+
+1. Download *chr*.fa.gz files from ftp://ftp.ncbi.nlm.nih.gov/genomes/[Your organism]/Assembled_chromosomes/seq/
+2. Run “perl gunzip_dir.pl <path to folder with your .fa.gz files>”, or simply “gunzip *.fa.gz”
+3. Run “perl compress_chr_dir.pl <path to folder with your .fa files>”
 
 So, if I had my files in /dir/hg38/, I would do:
 perl gunzip_dir.pl /dir/hg38/
