@@ -818,7 +818,7 @@ def translate_seq(sequence, strand, return_all = False):
 	'''
 	
 	for i in range(0,len(sequence)-2,3):
-		translated += codon_map[sequence[i:i+3]]
+		translated += codon_map.get(sequence[i:i+3],'X')
 	
 	# Now this should return the translated sequence up to the first stop codon.	
 	# That could either be at the actual end of the sequence, or at a variant that adds a stop.
@@ -1787,8 +1787,8 @@ def translate_novels(log_dir, bed_file, logfile):
 								# The splice happens in the middle of a codon
 								tryp = trypsinize(translated, 216, 216, True) # this math may be bad
 							to_write = ''.join(tryp).rstrip('*')
-							if '>NP_001299602-AN2-3-3' in second_header:
-								print translated, tryp, to_write, translated[214:216]
+							#if '>NP_001299602-AN2-3-3' in second_header:
+							#	print translated, tryp, to_write, translated[214:216]
 							if len(to_write) > 6:
 								out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
 								out_fasta.write(to_write+'\n')
@@ -1800,8 +1800,8 @@ def translate_novels(log_dir, bed_file, logfile):
 								# Splice happens in the middle of a codon
 								tryp = trypsinize(translated, 215, 215, True) # this math may be bad
 							to_write = ''.join(tryp).rstrip('*')
-							if '>NP_001299602-AN2-3-3' in second_header:
-								print translated, tryp, to_write, translated[214:216]
+							#if '>NP_001299602-AN2-3-3' in second_header:
+							#	print translated, tryp, to_write, translated[214:216]
 							if len(to_write) > 6:
 								out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
 								out_fasta.write(to_write+'\n')
