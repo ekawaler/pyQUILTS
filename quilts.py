@@ -1867,7 +1867,7 @@ def combine_output_fastas(out_dir):
 	for f in files:
 		if f.endswith('.fasta'):
 			with open(out_dir+'parts/'+f,'r') as src:
-				with open(out_dir+"proteome.fasta", 'a') as dest:
+				with open(out_dir+"variant_proteome.fasta", 'a') as dest:
 					shutil.copyfileobj(src, dest)
 
 ### These functions are used everywhere.
@@ -2079,9 +2079,10 @@ if __name__ == "__main__":
 		translate_novels(results_folder+"/log/", "novel_splices.bed.dna", logfile)
 		
 		# Move junctions to results folder
-		#shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
-		#shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
-		#write_to_status("Translated alternative-splice junctions")
+		shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
+		shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
+		shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.novel_splices.fasta")
+		write_to_status("Translated alternative-splice junctions")
 		
 	# Combine all of the proteome parts into one.
 	combine_output_fastas(results_folder+'/fasta/')
