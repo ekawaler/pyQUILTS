@@ -16,7 +16,7 @@ if ($error==0)
 	{
 		if ($filename=~/\.fa$/i)
 		{
-			system(qq!/ifs/data/proteomics/tcga/scripts/quilts/v2.0/compress_chr $dir/$filename!)
+			system(qq!./compress_chr $dir/$filename!)
 		}
 	}
 }

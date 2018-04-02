@@ -2081,7 +2081,7 @@ if __name__ == "__main__":
 		# Move junctions to results folder
 		shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
 		shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
-		shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.novel_splices.fasta")
+		shutil.copy(results_folder+"/log/novel_splices.bed.dna.fasta", results_folder+"/fasta/parts/proteome.novel_splices.fasta")
 		write_to_status("Translated alternative-splice junctions")
 		
 	# Combine all of the proteome parts into one.
