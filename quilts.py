@@ -2075,7 +2075,7 @@ if __name__ == "__main__":
 		translate(results_folder+"/log/", "alternative.bed.dna", logfile)
 		translate(results_folder+"/log/", "alternative_frameshift.bed.dna", logfile)
 		# Six-frame translations
-		shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/results_20171116.144632/log/novel_splices.bed.dna', results_folder+'/log/novel_splices.bed.dna')
+		#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/results_20171116.144632/log/novel_splices.bed.dna', results_folder+'/log/novel_splices.bed.dna')
 		translate_novels(results_folder+"/log/", "novel_splices.bed.dna", logfile)
 		
 		# Move junctions to results folder
