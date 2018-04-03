@@ -1,11 +1,13 @@
 #!c:/perl/bin/perl.exe
 #
 use strict;
+use Cwd;
 
 my $error=0;
 my $dir="";
+my $curdir = getcwd;
 
-if ($ARGV[0]=~/\w/) { $dir=$ARGV[0];} else { $dir="."; }
+if ($ARGV[0]=~/\w/) { $dir=$ARGV[0];} else { $dir=$curdir; }
 
 if ($error==0)
 {
@@ -16,7 +18,7 @@ if ($error==0)
 	{
 		if ($filename=~/\.fa$/i)
 		{
-			system(qq!./compress_chr $dir/$filename!)
+			system(qq!'$curdir/compress_chr' '$dir/$filename'!)
 		}
 	}
 }

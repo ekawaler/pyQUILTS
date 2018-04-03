@@ -5,7 +5,7 @@ int main ( int argc, char *argv[] )
 {
 	char filename[256];
 	char filename_out[256];
-    char buf[2000];
+    	char buf[2000];
 	if (argc==2)
 	{
 		strcpy(filename,argv[1]);
