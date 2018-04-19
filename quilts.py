@@ -470,7 +470,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 	# I think this is fixed, and it was a problem in a different script. Keeping this in anyway, just in case.
 	if '0' in full_seq  or 'N' in full_seq:
 		write_to_log(header_line+full_seq, logfile)
-		return changes, aa_substs
+		return changes, aa_substs, indels
 	
 	prev_start = -1 # Previous codon start position
 	prev_subst = [-1, ''] # Previous substitution position and nucleotide
@@ -1446,7 +1446,7 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 					if key in junctions_model_end_intron.keys():
 						# If only the end of the RNAseq intron was matched to 
 						# the existing in-database end of the DNA intron, we have
-						# the elongation of an exon within an intron.
+						# the elongation of an exon into an intron.
 						N = False
 						junc_status = "AN2"
 						#write_to_log("%s: %s" % (junc_status, key), logfile)
