@@ -129,7 +129,8 @@ def set_up_output_dir(output_dir, args):
 	
 	# Moves reference proteome to the working area.
 	try:
-		shutil.copy(args.proteome+"/proteome.fasta",results_folder+"/fasta/parts/"+args.proteome.split("/")[-1]+".fasta")
+		#shutil.copy(args.proteome+"/proteome.fasta",results_folder+"/fasta/"+args.proteome.split("/")[-1]+".fasta")
+		shutil.copy(args.proteome+"/proteome.fasta",results_folder+"/fasta/"+"reference_proteome.fasta")
 	except IOError:
 		raise SystemExit("ERROR: Reference proteome .fasta file not found at "+args.proteome+"/proteome.fasta.\nAborting program.")	
 	try:
