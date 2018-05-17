@@ -130,7 +130,7 @@ def set_up_output_dir(output_dir, args):
 	# Moves reference proteome to the working area.
 	try:
 		#shutil.copy(args.proteome+"/proteome.fasta",results_folder+"/fasta/"+args.proteome.split("/")[-1]+".fasta")
-		shutil.copy(args.proteome+"/proteome.fasta",results_folder+"/fasta/"+"reference_proteome.fasta")
+		shutil.copy(args.proteome+"/proteome.fasta",results_folder+"/fasta/reference_proteome.fasta")
 	except IOError:
 		raise SystemExit("ERROR: Reference proteome .fasta file not found at "+args.proteome+"/proteome.fasta.\nAborting program.")	
 	try:
@@ -1228,7 +1228,8 @@ def merge_junction_files(junc_dir, log_dir):
 def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
  	'''Filters out spliceform transcripts that are known from those that aren't, and annotates the ones that can be annotated. Haven't done any serious testing on this yet, so...yeah, use at yr own risk'''
 
-	junctions_model = {}
+	junctions_model_c = {}
+	junctions_model_one = {}
 	count_model_exons = 0
 	count_model_begin = 0
 	count_model_end = 0
@@ -1250,23 +1251,23 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 			for i in range(0,block_count-1):
 				begin_intron = start+sizes[i]+1
 				end_intron = begin_exon+starts[i+1]-1
-				key = "%s#%d#%d" % (chrm, begin_intron, end_intron)
-				junctions_model[key] = "C"
+				junctions_model_c.setdefault(chrm,{})
+				junctions_model_c[chrm].setdefault(begin_intron,{})
+				junctions_model_c[chrm][begin_intron][end_intron] = "C"
+				junctions_model_one.setdefault(chrm,{})
 				if i==0:
-					key = "%s#%d" % (chrm, begin_intron)
 					if strand == '+':
-						junctions_model[key] = "B"
+						junctions_model_one[chrm][begin_intron] = "B"
 						count_model_begin += 1
 					else:
-						junctions_model[key] = "E"
+						junctions_model_one[chrm][begin_intron] = "E"
 						count_model_end += 1
 				if i==block_count-1-1:
-					key = "%s#%d" % (chrm, end_intron)
 					if strand == '-':
-						junctions_model[key] = "B"
+						junctions_model_one[chrm][end_intron] = "B"
 						count_model_begin += 1
 					else:
-						junctions_model[key] = "E"
+						junctions_model_one[chrm][end_intron] = "E"
 						count_model_end += 1
 				start = begin_exon + starts[i+1]
 				count_model_exons += 1
@@ -1278,7 +1279,7 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 	num_observ_max = 0 # number of maximum observations for a particular intron in RNAseq data
 	count_junct_map = {'B': 0, 'E': 0, 'C': 0, '': 0}
 	count_junctions = 0
-	stat = {}
+	stat = {'B':{}, 'E':{}, 'C':{}, '':{}}
 	
 	for line in f.readlines():
 		spline = line.split()
@@ -1294,21 +1295,21 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 				end_intron = begin_ex_1 + spbegin_exons[-1]-1
 				length_intron = end_intron-begin_intron
 				# Figure out whether it already exists in the database and what type it is
-				if "%s#%d#%d" % (chrm, begin_intron, end_intron) in junctions_model.keys():
+				if chrm in junctions_model_c.keys() and begin_intron in junctions_model_c[chrm].keys() and end_intron in junctions_model_c[chrm][begin_intron].keys():
 					junction_status = 'C'
-				elif "%s#%d" % (chrm, begin_intron) in junctions_model.keys():
+				elif chrm in junctions_model_one.keys() and begin_intron in junctions_model_one[chrm].keys():
 					if junction_status == '':
-						junction_status = junctions_model["%s#%d" % (chrm, begin_intron)]
+						junction_status = junctions_model_one[chrm][begin_intron]
 				else:
-					if "%s#%d" % (chrm, end_intron) in junctions_model.keys():
+					if chrm in junctions_model_one.keys() and end_intron in junctions_model_one[chrm].keys():
 						if junction_status == '':
-							junction_status = junctions_model["%s#%d" % (chrm, end_intron)]
+							junction_status = junctions_model_one[chrm][end_intron]
 				# Log it
 				if junction_status == '':
 					w.write(line)
 				else:
-					key = "%s#%d" % (junction_status, num_observ)
-					stat[key] = stat.get(key,0) + 1
+					ct = stat[junction_status].get(num_observ,0)
+					stat[junction_status][num_observ] = ct+1
 					count_junct_map[junction_status] += 1
 				count_junctions += 1
 	f.close()
@@ -1316,14 +1317,11 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 	
 	# Write out a stats file 
 	w = open(results_folder+'/merged-junctions.filter.stats.txt','w')
-	w.write("num_observ\tC_matches\tB_matches\tE_matches\n")
+	w.write("num_observ\tC_matches\tB_matches\tE_matches\tnull_matches\n")
 	for i in range(1,num_observ_max+1):
 		w.write(str(i))
 		for type in ['C','B','E','']:
-			key = '%s#%d' % (type, i)
-			if key not in stat.keys():
-				stat[key] = 0
-			w.write('\t%d' % (stat[key]))
+			w.write('\t%d' % stat[type].get(i,0))
 		w.write('\n')
 	w.close()
 	
@@ -1334,7 +1332,7 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 	write_to_log("Total RNA-Seq introns: %d" % count_junctions, logfile)
 	for type in ['C','B','E','']:
 		write_to_log("RNA-Seq introns \"%s\": %d" % (type, count_junct_map[type]), logfile)
-
+		
 def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 	# Leaving out "print details", which seems to just write out a file for each protein, which seems...unnecessary and excessive? If it needs to come back it can come back.
 	# And if I do put that back, I need to make sure to find all the points in the original code where it's used (search print_details==1, OUT_DETAILS, should pick them up)
@@ -1361,14 +1359,20 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 		for i in range(0,block_count-1):
 			begin_intron = start + sizes[i] + 1
 			end_intron = begin_exon + starts[i+1] - 1
-			junctions_model.setdefault("%s#%d#%d" % (chr, begin_intron, end_intron),[]).append("%s,%d,%d" % (protein, i, i+1))
-			junctions_model_begin_intron.setdefault("%s#%d" % (chr, begin_intron),[]).append("%s,%d" % (protein, i))
-			junctions_model_end_intron.setdefault("%s#%d" % (chr, end_intron),[]).append("%s,%d" % (protein, i+1))
+			junctions_model.setdefault(chr,{})
+			junctions_model[chr].setdefault(begin_intron,{})
+			junctions_model[chr][begin_intron].setdefault(end_intron,[]).append("%s,%d,%d" % (protein, i, i+1))
+			junctions_model_begin_intron.setdefault(chr,{})
+			junctions_model_begin_intron[chr].setdefault(begin_intron,[]).append("%s,%d" % (protein, i))
+			junctions_model_end_intron.setdefault(chr,{})
+			junctions_model_end_intron[chr].setdefault(end_intron,[]).append("%s,%d" % (protein, i+1))
 			
 			# Looks to pick alternate blocks for possible weird splicing? is this really the most efficient way to do this? maybe it will make more sense later.
 			for j in range(i+2,block_count):
 				end_intron_tmp = begin_exon + starts[j] - 1
-				junctions_model_A.setdefault("%s#%d#%d" % (chr, begin_intron, end_intron_tmp),[]).append("%s,%d,%d" % (protein, i, j))
+				junctions_model_A.setdefault(chr,{})
+				junctions_model_A[chr].setdefault(begin_intron,{})
+				junctions_model_A[chr][begin_intron].setdefault(end_intron_tmp,[]).append("%s,%d,%d" % (protein, i, j))
 			start = begin_exon + starts[i+1]
 		count_model_exons += block_count # does this belong here? what is this even tracking
 		line_number += 1
@@ -1394,7 +1398,7 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 	num_observ_max = 0
 	junction_count = 0
 	count_junctions_map = {}
-	stat_map = {}
+	stat_map = {"C":{},"A":{},"AN1":{},"AN2":{}}
 	
 	line = f.readline()
 	while line:
@@ -1412,9 +1416,8 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 			start_ex_2 = end_intron + 1
 			len_intron = end_intron - begin_intron
 			
-			key = "%s#%d#%d" % (chr, begin_intron, end_intron)
 			# This apparently never executes. But why?
-			if key in junctions_model.keys():
+			if chr in junctions_model.keys() and begin_intron in junctions_model[chr].keys() and end_intron in junctions_model[chr][begin_intron].keys():
 				#print "Actually it totally does execute, dorkus %s" % key
 				junc_status = "C"
 				N = False
@@ -1422,36 +1425,33 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 				# I know these upcoming functions have a lot more parameters than should 
 				# be strictly necessary, but I thought this function was getting lengthy
 				# and I wanted to break it up a bit.
-				if key in junctions_model_A.keys():
+				if chr in junctions_model_A.keys() and begin_intron in junctions_model_A[chr].keys() and end_intron in junctions_model_A[chr][begin_intron].keys():
 					# If the RNAseq intron matched any of the beginnings/ends of introns
 					# from the gene, new gene created with exons that precede & follow
 					# RNAseq intron. (Conserved exon boundaries? I want to say yes?)
 					N = False
 					junc_status = "A"
 					#write_to_log("%s: %s" % (junc_status, key), logfile)
-					gn_name = conserved_exon_boundaries(junctions_model_A[key], models, num_observ, start_ex_2, threshA, outfile, outfile_EXTRA, outfile_, outfile_EXTRA_)
+					gn_name = conserved_exon_boundaries(junctions_model_A[chr][begin_intron][end_intron], models, num_observ, start_ex_2, threshA, outfile, outfile_EXTRA, outfile_, outfile_EXTRA_)
 				else:
-					key = "%s#%d" % (chr, begin_intron)
-					if key in junctions_model_begin_intron.keys():
+					if chr in junctions_model_begin_intron.keys() and begin_intron in junctions_model_begin_intron[chr].keys():
 						# If only the beginning of the RNAseq intron was matched to 
 						# the existing in-database beginning of the DNA intron, we have
 						# a truncated exon.
 						N = False
 						junc_status = "AN1"
-						#write_to_log("%s: %s" % (junc_status, key), logfile)
-						gn_name, outside = truncated_exon(junctions_model_begin_intron[key], models, end_intron, num_observ, start_ex_2, threshAN, outfile_AN, outfile_AN_EXTRA, outfile_AN_, outfile_AN_EXTRA_)
+						gn_name, outside = truncated_exon(junctions_model_begin_intron[chr][begin_intron], models, end_intron, num_observ, start_ex_2, threshAN, outfile_AN, outfile_AN_EXTRA, outfile_AN_, outfile_AN_EXTRA_)
 						if outside:
 							junc_status = ""
 					# Should this next chunk be in another else?
-					key = "%s#%d" % (chr, end_intron)
-					if key in junctions_model_end_intron.keys():
+					if chr in junctions_model_end_intron.keys() and end_intron in junctions_model_end_intron[chr].keys():
 						# If only the end of the RNAseq intron was matched to 
 						# the existing in-database end of the DNA intron, we have
 						# the elongation of an exon into an intron.
 						N = False
 						junc_status = "AN2"
 						#write_to_log("%s: %s" % (junc_status, key), logfile)
-						gn_name, outside = elongated_exon(junctions_model_end_intron[key], models, begin_intron, num_observ, start_ex_2, threshAN, outfile_AN, outfile_AN_EXTRA, outfile_AN_, outfile_AN_EXTRA_)
+						gn_name, outside = elongated_exon(junctions_model_end_intron[chr][end_intron], models, begin_intron, num_observ, start_ex_2, threshAN, outfile_AN, outfile_AN_EXTRA, outfile_AN_, outfile_AN_EXTRA_)
 						if outside:
 							junc_status = ""
 					if N or gn_name == "NO NAME":
@@ -1462,14 +1462,15 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 						gn_name = "NO_GENE-N-%d-%s-%s-%d-%d" % (num_observ, chr, junc_num, begin_intron, end_intron)
 		
 			new_line = "%s\t%d\t%d\t%s\t%s\n" % (chr, begin_ex_1, end_ex_2, gn_name, '\t'.join(spline[4:]))
+
 			if junc_status == "":
 				if threshN <= num_observ:
 					outfile_NOT.write(new_line)
 				else:
 					outfile_NOT_EXTRA.write(new_line)
 			else:
-				key = "%s#%d" % (junc_status, num_observ)
-				stat_map[key] = stat_map.get(key,0) + 1
+				stat_map[junc_status].setdefault(num_observ,0)
+				stat_map[junc_status][num_observ] += 1
 				count_junctions_map[junc_status] = count_junctions_map.get(junc_status, 0) + 1
 				if junc_status[:2] == "AN":
 					if threshAN <= num_observ:
@@ -1497,8 +1498,7 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 	for i in range(1,num_observ_max+1):
 		w.write(str(i))
 		for type in ["C","A","AN1","AN2"]:
-			key = "%s#%d" % (type, i)
-			w.write("\t%d" % stat_map.get(key, 0))
+			w.write("\t%d" % stat_map[type].get(i, 0))
 		w.write("\n")
 	w.close()
 	

@@ -139,7 +139,7 @@ int main ( int argc, char *argv[] )
 																	fprintf(fop,"%s\t+1\t%s\t%d\t%d\t%s\t0\t%s\n",name,chr,start_+length,padding,strand,buf);
 																}
 																fclose(fp_chr);
-															} else { printf("Error opening: %s",filename_chr); }
+															} else { printf("Error opening: %s\n",filename_chr); }
 														}
 													}
 												}
