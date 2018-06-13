@@ -104,7 +104,8 @@ def set_up_output_dir(output_dir, args):
 	# in the working directory? Maybe allow user input for this? Probably not though.
 	# Wouldn't be good if they were running it through qsub or whatever.
 	if not os.path.isdir(output_dir):
-		raise SystemExit("ERROR: Output directory does not exist.\nAborting program.")
+		#raise SystemExit("ERROR: Output directory does not exist.\nAborting program.")
+		os.makedirs(results_folder)
 	
 	# Makes the results folder. Calls it results_(date and time). Looks ugly, but I'm cool with that.
 	# Lets us avoid the problem of dealing with multiple results folders in the same output directory.
@@ -829,7 +830,107 @@ def translate_seq(sequence, strand, return_all = False):
 	else:
 		return translated.split('*')[0]
 
-def translate(log_dir, bed_file, logfile):
+def calculate_chr_pos(map_section):
+	'''Finding the chromosomal position of a variant'''
+	gene_start, strand = int(map_section.split()[0][:-1]),map_section.split()[0][-1]
+	lengths = map(int,map_section.split()[1].split(','))
+	starts = map(int,map_section.split()[2].split(','))
+	snp = map_section.split()[-1].split('-')[-1]
+	snp_pos = int(re.findall(r'\d+', snp)[0])
+	orig_nt, new_nt = snp.split(str(snp_pos))[0],snp.split(str(snp_pos))[-1]
+	tot_len = 0
+	for i in range(len(lengths)):
+		if tot_len+lengths[i] > snp_pos:
+			start_sec = gene_start+starts[i]
+			start_sec += snp_pos-tot_len
+			return "%s%d%s" % (orig_nt,start_sec,new_nt)
+		else:
+			tot_len += lengths[i]
+
+def format_aa_header(orig_header,abbr,desc):
+	#>NP_001909-G-T299C (MAP:chr1:100661810- 168,72,192,78,167,217,122,182,76,124,51 0,9975,10190,14439,18562,19728,22371,34478,39181,44506,53515 G-T299C:10378.200000) (VAR:G-S384G:10378.200000)
+	#to: >NP_XXXX-V500G|proteinDescription|GN=GeneID|chr=N|type=G|SNP=G12345C|QUAL=8|SAAP=V500G
+	id = orig_header.split('-')[0]
+	chr = orig_header.split(':')[1].lstrip('chr')
+	type = orig_header.split('-')[1]
+	#SNP_orig = orig_header.split('-')[2].split()[0]
+	SNP = calculate_chr_pos(orig_header.split(':')[2])
+	qual = orig_header.split(':')[-1].split(')')[0]
+	SAAP = orig_header.split('-')[-1].split(':')[0]
+	return "%s-%s|%s|GN=%s|chr=%s|type=%s|SNP=%s|qual=%s|SAAP=%s\n" % (id,SAAP,desc,abbr,chr,type,SNP,qual,SAAP)
+
+def format_indel_header(orig_header,abbr,desc):
+	#>NP_005057-indel (MAP:chr1:35650056- 138,122,49,118,85,197,96,302,189,828 0,2545,2747,3517,4547,4730,6042,6238,6885,7766 G-ACCA2082CCCC:0.000000)
+	#to: >NP_005057-ACCA2082CCCC|proteinDescription|GN=GeneID|chr=N|type=G|QUAL=?
+	id = orig_header.split('-')[0]
+	chr = orig_header.split(':')[1].lstrip('chr')
+	type = orig_header.split('-')[-2][-1]
+	#indel_orig = orig_header.split('-')[-1].split(':')[0]
+	indel = calculate_chr_pos(orig_header.split(':')[2])
+	qual = orig_header.split(':')[-1].split(')')[0]
+	return "%s-%s|%s|GN=%s|chr=%s|type=%s|indel=%s|qual=%s\n" % (id,indel,desc,abbr,chr,type,indel,qual)
+	
+def format_juncA_header(orig_header,abbr,desc):
+	#>NP_064587-A-5-7-3-chr3-100064522-100067646-75 (MAP:chr3:100053635+ 7,119,121,89,94,79,99,56,92 0,4295,5023,6281,10793,14011,17612,19980,20385)
+	# to: >NP_005057-bothJunc-100464971-100476920|proteinDescription|GN=GeneID|chr=N|type=bothConserved|donorExon=2|donorSite=100464971|acceptorExon=4|acceptorSite=100476920|reads=8	
+	id = orig_header.split('-')[0]
+	start = orig_header.split('-')[6]
+	end = orig_header.split('-')[7]
+	chr = orig_header.split('chr')[1].split('-')[0]
+	donor = orig_header.split('-')[2]
+	acceptor = orig_header.split('-')[3]
+	reads = orig_header.split('-')[4]	
+	return "%s-bothJunc-%s-%s|%s|GN=%s|chr=%s|type=bothConserved|donorExon=%s|donorSite=%s|acceptorExon=%s|acceptorSite=%s|reads=%s\n" % (id, start, end, desc, abbr, chr, donor, start, acceptor, end, reads)
+		
+def format_juncAN_header(orig_header,abbr,desc):
+	#>NP_060779-AN1-10-2-chr3-100018175-100020919 (MAP:chr3:99979862+ 53,112,106,205,124,125,47,104,123,93,163,43,107,140,89,136,195,82 0,18630,20723,22588,29559,34068,34283,35153,36904,38220,41057,43827,45418,49384,55080,58050,59758,62568)
+	#>NP_055635-AN2-9-1-chr3-100100578-100103322 (MAP:chr3:100084407- 154,123,98,117,108,135,208,120,110,127,174,324 0,2480,3474,7042,7974,9454,12141,16051,18915,20654,21241,35062)
+	#to: >NP_005057-donorJunc-100464971-100476920|proteinDescription|GN=GeneID|chr=N|strand=-|type=donorConserved|donorExon=2|donorSite=100464971|acceptorSite=100476920|reads=8
+
+	if "-A-" in orig_header:
+		return format_juncA_header(orig_header, abbr, desc)
+	
+	id = orig_header.split('-')[0]
+	start = orig_header.split('-')[5]
+	end = orig_header.split('-')[6].split()[0]
+	chr = orig_header.split('chr')[1].split('-')[0]
+	strand = orig_header.split()[1][-1]
+	conserved_exon = orig_header.split('-')[2]
+	reads = orig_header.split('-')[3]
+	#return "%s-donorJunc-%s-%s|%s|GN=%s|chr=%s|strand=%s|type=donorConserved|donorExon=%s|donorSite=%s|acceptorSite=%s|reads=%s\n" % (id, start, end, desc, abbr, chr, strand, conserved_exon, start, end, reads)
+	
+	if 'AN1' in orig_header:
+		return "%s-donorJunc-%s-%s|%s|GN=%s|chr=%s|strand=%s|type=donorConserved|donorExon=%s|donorSite=%s|acceptorSite=%s|reads=%s\n" % (id, start, end, desc, abbr, chr, strand, conserved_exon, start, end, reads)
+	elif 'AN2' in orig_header:
+		return "%s-donorJunc-%s-%s|%s|GN=%s|chr=%s|strand=%s|type=donorConserved|donorExon=%s|donorSite=%s|acceptorSite=%s|reads=%s\n" % (id, start, end, desc, abbr, chr, strand, conserved_exon, end, start, reads)
+
+def format_juncN_header(orig_header):
+	#>NO_GENE-N-1-chr3-j268-101520340-101520702 (MAP:chr3:101520289+ 50,50 0,414)-2-
+	#>NP_055230-AN2-9-1-chr3-101384962-101389973 (MAP:chr3:101384911+ 50,50 0,5062)-2-
+	#>NP_055575-AN1-5-12-chr3-10320146-10320347 (MAP:chr3:10320096+ 50,50 0,251)-0-
+	
+	#to: >NovelJunc-100464971-100476920|chr=N|type=novel|site1=100464971|site2=100476920|reads=8|Frame=1+
+	start = orig_header.split(' (')[0].split('-')[-2]
+	end = orig_header.split(' (')[0].split('-')[-1]
+	chr = orig_header.split('chr')[1].split('-')[0]
+	reads = orig_header.split('-chr')[0].split('-')[-1]
+	frame = orig_header.rstrip().split(')-')[-1]
+	return ">NovelJunc-%s-%s|chr=%s|type=novel|site1=%s|site2=%s|reads=%s|frame=%s\n"% (start,end,chr,start,end,reads,frame)
+
+def format_header(orig_header,seq_type,abbr,desc):
+	if seq_type=='aa':
+		return format_aa_header(orig_header,abbr,desc)
+	elif seq_type=='indel':
+		return format_indel_header(orig_header,abbr,desc)
+	elif seq_type=='juncA':
+		return format_juncA_header(orig_header,abbr,desc)
+	elif seq_type=='juncAN':
+		return format_juncAN_header(orig_header,abbr,desc)
+	elif seq_type=='juncN':
+		return format_juncN_header(orig_header)
+	return orig_header
+
+def translate(log_dir, bed_file, logfile, seq_type):
 	'''Reads in a bed.dna file and translates it to a protein .fasta file.'''
 	# Get the descriptions
 	desc = {}
@@ -871,7 +972,8 @@ def translate(log_dir, bed_file, logfile):
 						prev_AA_subst = []
 					if AA_subst not in prev_AA_subst:
 						translated = translate_seq(sequence.upper(), strand)
-						out_fasta.write(second_header)
+						out_fasta.write(format_header(second_header, seq_type, abbr[gene], desc[gene]))
+						#out_fasta.write(second_header)
 						out_fasta.write(translated+'\n')
 					prev_AA_subst.append(AA_subst)
 					prev_gene = gene
@@ -905,7 +1007,7 @@ def translate(log_dir, bed_file, logfile):
 		try:
 			if prev_gene != gene or AA_subst != prev_AA_subst:
 				translated = translate_seq(sequence.upper(), strand)
-				out_fasta.write(second_header)
+				out_fasta.write(format_header(second_header, seq_type, abbr[gene], desc[gene]))
 				out_fasta.write(translated+'\n')
 		except UnboundLocalError:
 			pass
@@ -1791,7 +1893,8 @@ def translate_novels(log_dir, bed_file, logfile):
 							#if '>NP_001299602-AN2-3-3' in second_header:
 							#	print translated, tryp, to_write, translated[214:216]
 							if len(to_write) > 6:
-								out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
+								#out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
+								out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'), 'juncN', None, None))
 								out_fasta.write(to_write+'\n')
 							translated = translate_seq(sequence.upper()[:-3-i], '-', True)
 							if i==2:
@@ -1804,7 +1907,8 @@ def translate_novels(log_dir, bed_file, logfile):
 							#if '>NP_001299602-AN2-3-3' in second_header:
 							#	print translated, tryp, to_write, translated[214:216]
 							if len(to_write) > 6:
-								out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
+								#out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
+								out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'), 'juncN', None, None))
 								out_fasta.write(to_write+'\n')
 					prev_AA_subst.append(AA_subst)
 					prev_gene = gene
@@ -1841,7 +1945,8 @@ def translate_novels(log_dir, bed_file, logfile):
 						tryp = trypsinize(translated, 216, 216, True) # this math may be bad
 					to_write = ''.join(tryp).rstrip('*')	
 					if len(to_write) > 6:
-						out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
+						#out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
+						out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'), 'juncN', None, None))
 						out_fasta.write(to_write+'\n')
 					translated = translate_seq(sequence.upper()[:-3-i], '-', True)
 					if i==2:
@@ -1852,7 +1957,8 @@ def translate_novels(log_dir, bed_file, logfile):
 						tryp = trypsinize(translated, 215, 215, True) # this math may be bad
 					to_write = ''.join(tryp).rstrip('*')
 					if len(to_write) > 6:
-						out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
+						#out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
+						out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'), 'juncN', None, None))
 						out_fasta.write(to_write+'\n')
 		except UnboundLocalError:
 			pass
@@ -1973,18 +2079,18 @@ if __name__ == "__main__":
 		write_to_status("Variants sorted")	
 
 		# Translate the variant sequences into a fasta file.
-		translate(results_folder+"/log/", "proteome.aa.var.bed.dna", logfile)
+		translate(results_folder+"/log/", "proteome.aa.var.bed.dna", logfile, 'aa')
 		write_to_status("Translated SAAVs")	
-		translate(results_folder+"/log/", "proteome.indel.var.bed.dna", logfile)
+		translate(results_folder+"/log/", "proteome.indel.var.bed.dna", logfile, 'indel')
 		write_to_status("Translated indels")
 		shutil.copy(results_folder+"/log/proteome.aa.var.bed.dna.fasta", results_folder+"/fasta/parts/proteome.aa.fasta")
 		shutil.copy(results_folder+"/log/proteome.indel.var.bed.dna.fasta", results_folder+"/fasta/parts/proteome.indel.fasta")
 
 		# Time for tryptic peptides! Remember: C-term (after) K/R residues
-		make_aa_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
-		write_to_status("Tryptic peptides done.")
-		make_indel_peptide_fasta(results_folder+"/log/", logfile)
-		write_to_status("Indel tryptic peptides done.")
+		#make_aa_peptide_fasta(results_folder+"/log/", args.no_missed_cleavage)
+		#write_to_status("Tryptic peptides done.")
+		#make_indel_peptide_fasta(results_folder+"/log/", logfile)
+		#write_to_status("Indel tryptic peptides done.")
 	
 	# Let's move on to alternate splice junctions.
 	# We're removing some of the earlier parts for now to expedite testing.
@@ -2073,15 +2179,19 @@ if __name__ == "__main__":
 		# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
 		# Basically, though, can use the indel translation function (keep the exon with the variant and everything that comes after) for all of them except the ones where the exon boundaries are both new, in which case we need to do all six reading frames. And we saved those...where? notA?
 		# Single frame translations
-		translate(results_folder+"/log/", "alternative.bed.dna", logfile)
-		translate(results_folder+"/log/", "alternative_frameshift.bed.dna", logfile)
+		translate(results_folder+"/log/", "alternative.bed.dna", logfile, 'juncA')
+		translate(results_folder+"/log/", "alternative_frameshift.bed.dna", logfile, 'juncAN')
 		# Six-frame translations
 		#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/results_20171116.144632/log/novel_splices.bed.dna', results_folder+'/log/novel_splices.bed.dna')
 		translate_novels(results_folder+"/log/", "novel_splices.bed.dna", logfile)
 		
 		# Move junctions to results folder
-		shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
-		shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
+		#shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
+		#shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
+		shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_splices.fasta")
+		with open(results_folder+"/log/alternative_frameshift.bed.dna.fasta", 'r') as src:
+			with open(results_folder+"/fasta/parts/proteome.alternative_splices.fasta",'a') as dest:
+				shutil.copyfileobj(src, dest)
 		shutil.copy(results_folder+"/log/novel_splices.bed.dna.fasta", results_folder+"/fasta/parts/proteome.novel_splices.fasta")
 		write_to_status("Translated alternative-splice junctions")
 		
