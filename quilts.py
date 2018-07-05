@@ -1904,6 +1904,7 @@ def translate_novels(log_dir, bed_file, logfile):
 								# Splice happens in the middle of a codon
 								tryp = trypsinize(translated, 215, 215, True) # this math may be bad
 							to_write = ''.join(tryp).rstrip('*')
+							to_write = to_write.split('*')[0]
 							#if '>NP_001299602-AN2-3-3' in second_header:
 							#	print translated, tryp, to_write, translated[214:216]
 							if len(to_write) > 6:
@@ -1956,6 +1957,7 @@ def translate_novels(log_dir, bed_file, logfile):
 						# Splice happens in the middle of a codon
 						tryp = trypsinize(translated, 215, 215, True) # this math may be bad
 					to_write = ''.join(tryp).rstrip('*')
+					to_write = to_write.split('*')[0] # Not quite sure why, but was still getting stops in the middle of the output sequences.
 					if len(to_write) > 6:
 						#out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'))
 						out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'), 'juncN', None, None))
@@ -2108,92 +2110,93 @@ if __name__ == "__main__":
 		junc_flag = merge_junction_files(args.junction, results_folder+'/log')
 		if junc_flag:
 			args.junction = None
-		quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
-		filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)
-		#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
-		filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
-		write_to_status("Filtered alternative splices into the appropriate types.")
+			quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
+		else:
+			filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)
+			#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/merged-junctions.filter.bed', results_folder+"/log/")
+			filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
+			write_to_status("Filtered alternative splices into the appropriate types.")
 		
-		# Make a fasta out of the alternative splices with conserved exon boundaries
-		write_to_status("About to do a read_chr_bed")
-		try:
-			check_call("%s/read_chr_bed %s/log/merged-junctions.filter.A.bed %s" % (script_dir, results_folder, args.genome), shell=True)
-			# Don't know why this copies instead of moving. If I never use merged-junctions.filter.A.bed.dna again, just move it or have read_chr_bed output the alternative.bed.dna file instead.
-			shutil.copy(results_folder+'/log/merged-junctions.filter.A.bed.dna', results_folder+'/log/alternative.bed.dna')
-		except CalledProcessError:
-			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
-		write_to_status("Done with read_chr_bed to create alternative.bed.dna")
+			# Make a fasta out of the alternative splices with conserved exon boundaries
+			write_to_status("About to do a read_chr_bed")
+			try:
+				check_call("%s/read_chr_bed %s/log/merged-junctions.filter.A.bed %s" % (script_dir, results_folder, args.genome), shell=True)
+				# Don't know why this copies instead of moving. If I never use merged-junctions.filter.A.bed.dna again, just move it or have read_chr_bed output the alternative.bed.dna file instead.
+				shutil.copy(results_folder+'/log/merged-junctions.filter.A.bed.dna', results_folder+'/log/alternative.bed.dna')
+			except CalledProcessError:
+				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
+			write_to_status("Done with read_chr_bed to create alternative.bed.dna")
 				
-		'''
-		# Grabbing the variants that are in these splice junctions, I guess. This seems like fishing for dregs.
-		# Removing this for now, just because it takes so long and I might want to do it differently.
-		if args.somatic:
-			get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed", "S")
-			if not args.germline: # Move the somatic variants to the merged .bed.var file, otherwise wait
-				shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.S.var", results_folder+"/log/merged-junctions.filter.A.bed.var")
-		if args.germline:
-			get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed", "G")
-			if args.somatic: # Put the germline variants in with the somatic ones
-				with open(results_folder+"/log/merged-junctions.filter.A.bed.G.var", 'r') as src:
-					with open(results_folder+"/log/merged-junctions.filter.A.bed.var",'w') as dest:
-						shutil.copyfileobj(src, dest)
+			'''
+			# Grabbing the variants that are in these splice junctions, I guess. This seems like fishing for dregs.
+			# Removing this for now, just because it takes so long and I might want to do it differently.
+			if args.somatic:
+				get_variants(args.somatic+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed", "S")
+				if not args.germline: # Move the somatic variants to the merged .bed.var file, otherwise wait
+					shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.S.var", results_folder+"/log/merged-junctions.filter.A.bed.var")
+			if args.germline:
+				get_variants(args.germline+"/merged_pytest/merged.vcf", results_folder+"/log/merged-junctions.filter.A.bed", "G")
+				if args.somatic: # Put the germline variants in with the somatic ones
+					with open(results_folder+"/log/merged-junctions.filter.A.bed.G.var", 'r') as src:
+						with open(results_folder+"/log/merged-junctions.filter.A.bed.var",'w') as dest:
+							shutil.copyfileobj(src, dest)
+					dest.close()
+					src.close()
+				else:
+					shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.G.var")
+			if args.somatic or args.germline:
+				sort_variants(results_folder+"/log/merged-junctions.filter.A.bed.dna", results_folder+"/log/merged-junctions.filter.A.bed.var", "merged-junctions.filter.A")
+				# Move them into the file with the other junctions for translating
+				with open(results_folder+"/log/merged-junctions.filter.A.aa.var.bed.dna", 'r') as src:
+						with open(results_folder+"/log/alternative.bed.dna",'a') as dest:
+							shutil.copyfileobj(src, dest)
 				dest.close()
 				src.close()
-			else:
-				shutil.copy(results_folder+"/log/merged-junctions.filter.A.bed.var", results_folder+"/log/merged-junctions.filter.A.bed.G.var")
-		if args.somatic or args.germline:
-			sort_variants(results_folder+"/log/merged-junctions.filter.A.bed.dna", results_folder+"/log/merged-junctions.filter.A.bed.var", "merged-junctions.filter.A")
-			# Move them into the file with the other junctions for translating
-			with open(results_folder+"/log/merged-junctions.filter.A.aa.var.bed.dna", 'r') as src:
-					with open(results_folder+"/log/alternative.bed.dna",'a') as dest:
-						shutil.copyfileobj(src, dest)
-			dest.close()
-			src.close()
-		'''
+			'''
 		
-		# Okay, well, I'm going to try to just do the same thing on A_, AN, and AN_.
-		write_to_status("About to do a read_chr_bed")
-		shutil.copy(results_folder+"/log/merged-junctions.filter.A_.bed", results_folder+"/log/merged-junctions.filter.A_AN.bed")
-		with open(results_folder+"/log/merged-junctions.filter.AN.bed", 'r') as src:
-			with open(results_folder+"/log/merged-junctions.filter.A_AN.bed",'a') as dest:
-				shutil.copyfileobj(src, dest) # Adds in AN
+			# Okay, well, I'm going to try to just do the same thing on A_, AN, and AN_.
+			write_to_status("About to do a read_chr_bed")
+			shutil.copy(results_folder+"/log/merged-junctions.filter.A_.bed", results_folder+"/log/merged-junctions.filter.A_AN.bed")
+			with open(results_folder+"/log/merged-junctions.filter.AN.bed", 'r') as src:
+				with open(results_folder+"/log/merged-junctions.filter.A_AN.bed",'a') as dest:
+					shutil.copyfileobj(src, dest) # Adds in AN
 
-		# Does the read_chr_bed		
-		try:
-			check_call("%s/read_chr_bed %s/log/merged-junctions.filter.A_AN.bed %s" % (script_dir, results_folder, args.genome), shell=True)
-			# Don't know why this copies instead of moving. If I never use merged-junctions.filter.A.bed.dna again, just move it or have read_chr_bed output the alternative.bed.dna file instead.
-			shutil.copy(results_folder+'/log/merged-junctions.filter.A_AN.bed.dna', results_folder+'/log/alternative_frameshift.bed.dna')
-		except CalledProcessError:
-			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A_AN.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
-		write_to_status("Done with read_chr_bed to create alternative_frameshift.bed.dna")
+			# Does the read_chr_bed		
+			try:
+				check_call("%s/read_chr_bed %s/log/merged-junctions.filter.A_AN.bed %s" % (script_dir, results_folder, args.genome), shell=True)
+				# Don't know why this copies instead of moving. If I never use merged-junctions.filter.A.bed.dna again, just move it or have read_chr_bed output the alternative.bed.dna file instead.
+				shutil.copy(results_folder+'/log/merged-junctions.filter.A_AN.bed.dna', results_folder+'/log/alternative_frameshift.bed.dna')
+			except CalledProcessError:
+				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.A_AN.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
+			write_to_status("Done with read_chr_bed to create alternative_frameshift.bed.dna")
 			
-		# Now to tackle the novels...
-		write_to_status("About to do a read_chr_bed")
-		try:
-			check_call("%s/read_chr_bed %s/log/merged-junctions.filter.notA.bed %s" % (script_dir, results_folder, args.genome), shell=True)
-			shutil.copy(results_folder+'/log/merged-junctions.filter.notA.bed.dna', results_folder+'/log/novel_splices.bed.dna')
-		except CalledProcessError:
-			warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.notA.bed.dna file. Will not have a fasta file of novel spliceforms.")
-		write_to_status("Done with read_chr_bed to create novel_splices.bed.dna")
+			# Now to tackle the novels...
+			write_to_status("About to do a read_chr_bed")
+			try:
+				check_call("%s/read_chr_bed %s/log/merged-junctions.filter.notA.bed %s" % (script_dir, results_folder, args.genome), shell=True)
+				shutil.copy(results_folder+'/log/merged-junctions.filter.notA.bed.dna', results_folder+'/log/novel_splices.bed.dna')
+			except CalledProcessError:
+				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.filter.notA.bed.dna file. Will not have a fasta file of novel spliceforms.")
+			write_to_status("Done with read_chr_bed to create novel_splices.bed.dna")
 		
-		# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
-		# Basically, though, can use the indel translation function (keep the exon with the variant and everything that comes after) for all of them except the ones where the exon boundaries are both new, in which case we need to do all six reading frames. And we saved those...where? notA?
-		# Single frame translations
-		translate(results_folder+"/log/", "alternative.bed.dna", logfile, 'juncA')
-		translate(results_folder+"/log/", "alternative_frameshift.bed.dna", logfile, 'juncAN')
-		# Six-frame translations
-		#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/results_20171116.144632/log/novel_splices.bed.dna', results_folder+'/log/novel_splices.bed.dna')
-		translate_novels(results_folder+"/log/", "novel_splices.bed.dna", logfile)
+			# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
+			# Basically, though, can use the indel translation function (keep the exon with the variant and everything that comes after) for all of them except the ones where the exon boundaries are both new, in which case we need to do all six reading frames. And we saved those...where? notA?
+			# Single frame translations
+			translate(results_folder+"/log/", "alternative.bed.dna", logfile, 'juncA')
+			translate(results_folder+"/log/", "alternative_frameshift.bed.dna", logfile, 'juncAN')
+			# Six-frame translations
+			#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/results_20171116.144632/log/novel_splices.bed.dna', results_folder+'/log/novel_splices.bed.dna')
+			translate_novels(results_folder+"/log/", "novel_splices.bed.dna", logfile)
 		
-		# Move junctions to results folder
-		#shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
-		#shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
-		shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_splices.fasta")
-		with open(results_folder+"/log/alternative_frameshift.bed.dna.fasta", 'r') as src:
-			with open(results_folder+"/fasta/parts/proteome.alternative_splices.fasta",'a') as dest:
-				shutil.copyfileobj(src, dest)
-		shutil.copy(results_folder+"/log/novel_splices.bed.dna.fasta", results_folder+"/fasta/parts/proteome.novel_splices.fasta")
-		write_to_status("Translated alternative-splice junctions")
+			# Move junctions to results folder
+			#shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
+			#shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
+			shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_splices.fasta")
+			with open(results_folder+"/log/alternative_frameshift.bed.dna.fasta", 'r') as src:
+				with open(results_folder+"/fasta/parts/proteome.alternative_splices.fasta",'a') as dest:
+					shutil.copyfileobj(src, dest)
+			shutil.copy(results_folder+"/log/novel_splices.bed.dna.fasta", results_folder+"/fasta/parts/proteome.novel_splices.fasta")
+			write_to_status("Translated alternative-splice junctions")
 		
 	# Combine all of the proteome parts into one.
 	combine_output_fastas(results_folder+'/fasta/')
