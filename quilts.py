@@ -2074,6 +2074,7 @@ def translate_fusions(result_dir):
 			else:
 				seq += line.rstrip().split()[-1]
 			if second:
+				seq = seq.upper()
 				for i in range(0,3):
 					w.write('>%s|%d+\n' % (line.split()[0],i))
 					w.write('%s\n' % translate_seq(seq[i:], '+', True))
