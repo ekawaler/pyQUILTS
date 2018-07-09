@@ -68,7 +68,7 @@ def parse_input_arguments():
 	parser.add_argument('--somatic',type=str)
 	parser.add_argument('--junction', type=str)
 	parser.add_argument('--mapsplice', action='store_true', default=False, help="Use this if your junctions were created by MapSplice rather than Tophat. Automatically converts the junctions.txt file at the junction location to a file called junctions.bed which can be found by this script.")
-	parser.add_argument('--fusion', type=str, help="Fusion genes [currently unsupported]")
+	parser.add_argument('--fusion', type=str, help="full path to folder containing fusion file")
 	parser.add_argument('--threshA', type=int, default=2)
 	parser.add_argument('--threshAN', type=int, default=3)
 	parser.add_argument('--threshN', type=int, default=3)
@@ -79,8 +79,8 @@ def parse_input_arguments():
 	args = parser.parse_args()
 	# Check that we have a somatic and/or germline and/or junction file. Abort if not.
 	# Will add fusion to this check later.
-	if not args.somatic and not args.germline and not args.junction:
-		raise SystemExit("ERROR: Must have at least one variant file (somatic, germline, and/or junctions).\nAborting program.")
+	if not args.somatic and not args.germline and not args.junction and not args.fusion:
+		raise SystemExit("ERROR: Must have at least one variant file (somatic, germline, fusion, and/or junctions).\nAborting program.")
 	
 	return args
 
@@ -1890,10 +1890,7 @@ def translate_novels(log_dir, bed_file, logfile):
 								# The splice happens in the middle of a codon
 								tryp = trypsinize(translated, 216, 216, True) # this math may be bad
 							to_write = ''.join(tryp).rstrip('*')
-							#if '>NP_001299602-AN2-3-3' in second_header:
-							#	print translated, tryp, to_write, translated[214:216]
 							if len(to_write) > 6:
-								#out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
 								out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'), 'juncN', None, None))
 								out_fasta.write(to_write+'\n')
 							translated = translate_seq(sequence.upper()[:-3-i], '-', True)
@@ -1967,6 +1964,127 @@ def translate_novels(log_dir, bed_file, logfile):
 
 	f.close()
 	out_fasta.close()
+
+### These functions are used for fusions
+
+def pull_fusion_files(fusion_dir):
+	'''Finds all *.txt files in the directory.'''
+	files = os.listdir(fusion_dir)
+	fusion_files = []
+	for f in files:
+		if f.endswith('.txt'):
+			fusion_files.append(f)
+	return fusion_files
+
+def merge_and_filter_fusion_files(fusion_dir, result_dir):
+	'''Merges fusion files found in fusion_dir, filtering out anything that doesn't match a threshold for Junction Read Count. Returns 1 if unable to open any junction files or nothing if it runs to completion.'''
+	
+	num_observ_map = {}
+	jrc_threshold = 1
+	
+	# Tries to pull a list of junction files. Returns with a warning if unable to find any.
+	if not os.path.isdir(fusion_dir):
+		# No junction files are going to be found. Gotta leave the function.
+		warnings.warn("Unable to open fusion folder %s. Giving up on finding gene fusions." % junc_dir)
+		return 1
+	fusion_files = pull_fusion_files(fusion_dir)
+	if len(fusion_files) == 0:
+		warnings.warn("Unable to find any .txt files in %s." % fusion_dir)
+		return 1
+	
+	# Write a header line
+	w = open(result_dir+'/log/merged-fusions.txt','w')
+	f = open(fusion_dir+'/'+fusion_files[0],'r')
+	w.write(f.readline())
+	f.close()
+	
+	count_all = 0
+	count_thresholded = 0
+	
+	for file in fusion_files:
+		f = open(fusion_dir+'/'+file,'r')
+		line = f.readline() # skip headers
+		line = f.readline()
+		while line:
+			count_all += 1
+			spline = line.split()
+			if int(spline[4]) >= jrc_threshold:
+				w.write(line)
+				count_thresholded += 1
+			line = f.readline()
+		f.close()
+	
+	write_to_log("\n---Fusion Filtering Results---",result_dir+'/log.txt')
+	write_to_log("Found %d fusions for this sample" % count_all,result_dir+'/log.txt')
+	write_to_log("%d fusions passed threshold of %d JunctionReadCount" % (count_thresholded, jrc_threshold), result_dir+'/log.txt')
+
+def create_fusion_bed(result_dir):
+	'''Translate the fusion file to a DNA fasta file. Can't do a regular bed file because of the multiple chromosome possibility.'''
+
+	f = open(result_dir+'/log/merged-fusions.txt','r')
+	#chr1	67000041	67000091	NP_001337147	0	+	67000041	67000091	0	1	50,	0,
+	w = open(result_dir+'/log/fusions.bed','w')
+	
+	header = f.readline()
+	line = f.readline()
+	while line:
+		spline = line.split()
+		# FASTA header: fusion name, left break, right break, JRC
+		fus_name = '%s|leftBreak=%s|rightBreak=%s|junctionReadCount=%s' % (spline[0], spline[1], spline[2], spline[4])
+		# Grab 50 bases before the left breakpoint
+		first_chr = spline[1].split(':')[0]
+		first_chr_pos = int(spline[1].split(':')[1])
+		first_chr_strand = spline[1].split(':')[2]
+		if first_chr_strand == '+':
+			first_chr_start = first_chr_pos-50
+		else:
+			first_chr_start = first_chr_pos+50
+		w.write("%s\t%d\t%d\t%s\t0\t%s\t%d\t%d\t0\t1\t50\t0\n" % (first_chr,min(first_chr_start, first_chr_pos),max(first_chr_start, first_chr_pos),fus_name,first_chr_strand,min(first_chr_start, first_chr_pos),max(first_chr_start, first_chr_pos)))
+		# ...and 50 after the right
+		second_chr = spline[2].split(':')[0]
+		second_chr_pos = int(spline[2].split(':')[1])
+		second_chr_strand = spline[2].split(':')[2]
+		if second_chr_strand == '+':
+			second_chr_end = second_chr_pos+50
+		else:
+			second_chr_end = second_chr_pos-50
+		w.write("%s\t%d\t%d\t%s\t0\t%s\t%d\t%d\t0\t1\t50\t0\n" % (second_chr,min(second_chr_end, second_chr_pos),max(second_chr_end, second_chr_pos),fus_name,second_chr_strand,min(second_chr_end, second_chr_pos),max(second_chr_end, second_chr_pos)))
+		
+		line = f.readline()
+		
+	f.close()
+	w.close()
+
+def translate_fusions(result_dir):
+	'''In the bed file we read in, the sequences come in pairs - first sequence in the pair is the left gene, second is the right gene.'''
+	
+	translate_table = maketrans("ACGTacgt","TGCAtgca")
+	
+	f = open(result_dir+'/log/fusions.bed.dna','r')
+	w = open(result_dir+'/log/fusions.fasta','w')
+	# We want to take the 4th line and every 5th line after that (that's the line with the 50 bases we want to keep, the rest is various buffers and metadata stuff)
+	pos = 2
+	second = False
+	seq = ""
+	line = f.readline()
+	while line:
+		if pos%5 == 0:
+			if line.split()[5] == '-':
+				seq += line.rstrip().split()[-1][::-1].translate(translate_table)
+			else:
+				seq += line.rstrip().split()[-1]
+			if second:
+				for i in range(0,3):
+					w.write('>%s|%d+\n' % (line.split()[0],i))
+					w.write('%s\n' % translate_seq(seq[i:], '+', True))
+					w.write('>%s|%d-\n' % (line.split()[0],i))
+					w.write('%s\n' % translate_seq(seq[:len(seq)-i], '-', True))
+				second = False
+				seq = ""
+			else:
+				second = True
+		line = f.readline()
+		pos += 1
 
 ### This function is used at the end to combine all of the output fasta files into one.
 
@@ -2197,6 +2315,23 @@ if __name__ == "__main__":
 					shutil.copyfileobj(src, dest)
 			shutil.copy(results_folder+"/log/novel_splices.bed.dna.fasta", results_folder+"/fasta/parts/proteome.novel_splices.fasta")
 			write_to_status("Translated alternative-splice junctions")
+	
+	if args.fusion:
+		write_to_status("Starting on fusions now.")
+		fusion_flag = merge_and_filter_fusion_files(args.fusion, results_folder)
+		if fusion_flag:
+			args.fusion = None
+			quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
+		else:
+			#fusion time
+			create_fusion_bed(results_folder)
+			write_to_status("About to do a read_chr_bed")
+			try:
+				check_call("%s/read_chr_bed %s/log/fusions.bed %s" % (script_dir, results_folder, args.genome), shell=True)
+			except CalledProcessError:
+				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a fusions.bed.dna file. Will not be able to perform fusions.")
+			write_to_status("Done with read_chr_bed to fusions.bed.dna")
+			translate_fusions(results_folder)
 		
 	# Combine all of the proteome parts into one.
 	combine_output_fastas(results_folder+'/fasta/')
