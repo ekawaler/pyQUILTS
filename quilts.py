@@ -2332,6 +2332,7 @@ if __name__ == "__main__":
 				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a fusions.bed.dna file. Will not be able to perform fusions.")
 			write_to_status("Done with read_chr_bed to fusions.bed.dna")
 			translate_fusions(results_folder)
+			shutil.copy(results_folder+"/log/fusions.fasta", results_folder+"/fasta/parts/proteome.fusions.fasta")
 		
 	# Combine all of the proteome parts into one.
 	combine_output_fastas(results_folder+'/fasta/')
