@@ -105,7 +105,7 @@ def set_up_output_dir(output_dir, args):
 	# Wouldn't be good if they were running it through qsub or whatever.
 	if not os.path.isdir(output_dir):
 		#raise SystemExit("ERROR: Output directory does not exist.\nAborting program.")
-		os.makedirs(results_folder)
+		os.makedirs(output_dir)
 	
 	# Makes the results folder. Calls it results_(date and time). Looks ugly, but I'm cool with that.
 	# Lets us avoid the problem of dealing with multiple results folders in the same output directory.
@@ -2019,7 +2019,7 @@ def merge_and_filter_fusion_files(fusion_dir, result_dir):
 	write_to_log("%d fusions passed threshold of %d JunctionReadCount" % (count_thresholded, jrc_threshold), result_dir+'/log.txt')
 
 def create_fusion_bed(result_dir):
-	'''Translate the fusion file to a DNA fasta file. Can't do a regular bed file because of the multiple chromosome possibility.'''
+	'''Translate the fusion file to a DNA bed file. One entry for each side, since we can't guarantee they're on the same chromosome'''
 
 	f = open(result_dir+'/log/merged-fusions.txt','r')
 	#chr1	67000041	67000091	NP_001337147	0	+	67000041	67000091	0	1	50,	0,
