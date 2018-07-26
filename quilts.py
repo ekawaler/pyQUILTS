@@ -1279,7 +1279,6 @@ def merge_junction_files(junc_dir, log_dir):
 	min_sum_length = 45
 	
 	num_observ_map = {}
-	junction_map = {} # Is never used.
 	
 	# Tries to pull a list of junction files. Returns with a warning if unable to find any.
 	if not os.path.isdir(junc_dir):
@@ -1308,23 +1307,25 @@ def merge_junction_files(junc_dir, log_dir):
 				if 'chr' not in chrm:
 					chrm = 'chr'+chrm
 				if splen_exons[0] >= min_length and splen_exons[1] >= min_length and sum(splen_exons) >= min_sum_length:
-					key = '%s#%d#%d' % (chrm,begin_intron,end_intron)
+					#key = '%s#%d#%d' % (chrm,begin_intron,end_intron)
+					num_observ_map.setdefault(chrm,{})
+					num_observ_map[chrm].setdefault(begin_intron,{})
+					num_observ_map[chrm][begin_intron][end_intron] = num_observ_map[chrm][begin_intron].get(end_intron,0) + int(num_observ)
 					# Why are these two (adding an int and appending to a list) so different? It's hideous. But this is as efficient as I can get with it right now.
-					num_observ_map[key] = num_observ_map.get(key,0) + int(num_observ)
-					junction_map.setdefault(key,[]).append(junc_num+label)
+					#num_observ_map[key] = num_observ_map.get(key,0) + int(num_observ)
 		f.close()
 		
 	# Time to write out our results
 	w = open(log_dir+'/merged-junctions.bed','w')
 	count = 0
-	for key in sorted(num_observ_map.keys()):
-		spkey = key.split('#')
-		chr, beg_int, end_int = spkey[0], int(spkey[1]), int(spkey[2])
-		begin_ex_1 = beg_int-50-1
-		end_ex_2 = end_int+50+1
-		start_ex_2 = end_int+1-begin_ex_1 
-		w.write("%s\t%d\t%d\tj%d\t%d\t+\t%d\t%d\t0\t2\t50,50\t0,%d\n" % (chr,begin_ex_1,end_ex_2,count,num_observ_map[key],begin_ex_1,end_ex_2,start_ex_2))
-		count += 1
+	for chr in sorted(num_observ_map.keys()):
+		for beg_int in sorted(num_observ_map[chr].keys()):
+			for end_int in sorted(num_observ_map[chr][beg_int].keys()):
+				begin_ex_1 = beg_int-50-1
+				end_ex_2 = end_int+50+1
+				start_ex_2 = end_int+1-begin_ex_1 
+				w.write("%s\t%d\t%d\tj%d\t%d\t+\t%d\t%d\t0\t2\t50,50\t0,%d\n" % (chr,begin_ex_1,end_ex_2,count,num_observ_map[chr][beg_int][end_int],begin_ex_1,end_ex_2,start_ex_2))
+				count += 1
 	w.close()
 							
 def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
