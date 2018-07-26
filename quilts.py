@@ -1837,11 +1837,11 @@ def elongated_exon(prot_info, models, begin_intron, num_observ, start_exon_2, th
 
 ### These functions are used to translate junction files.
 
-def translate_novels(log_dir, bed_file, logfile):
-	'''Main function for adding non-frameshifted junctions to the tryptic peptide fasta.
+def translate_novels_with_trypsin(log_dir, bed_file, logfile):
+	'''NOT IN USE CURRENTLY
+	Main function for adding non-frameshifted junctions to the tryptic peptide fasta.
 	Basically, add the peptide that includes the junction and everything that comes after it.
-	Later: maybe remove the parts that come after it if it isn't frameshifted? That might be complicated.
-	NOT FINISHED'''
+	Later: maybe remove the parts that come after it if it isn't frameshifted? That might be complicated.'''
 	# Get the descriptions
 	desc = {}
 	f = open(log_dir+"proteome-descriptions.txt",'r')
@@ -1893,7 +1893,7 @@ def translate_novels(log_dir, bed_file, logfile):
 							if len(to_write) > 6:
 								out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'), 'juncN', None, None))
 								out_fasta.write(to_write+'\n')
-							translated = translate_seq(sequence.upper()[:-3-i], '-', True)
+							translated = translate_seq(sequence.upper()[:len(sequence)-i], '-', True)
 							if i==2:
 								# Splice happens between codons
 								tryp = trypsinize(translated, 214, 215, True) # this math may be bad
@@ -1946,7 +1946,7 @@ def translate_novels(log_dir, bed_file, logfile):
 						#out_fasta.write('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'))
 						out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'), 'juncN', None, None))
 						out_fasta.write(to_write+'\n')
-					translated = translate_seq(sequence.upper()[:-3-i], '-', True)
+					translated = translate_seq(sequence.upper()[:len(sequence)-i], '-', True)
 					if i==2:
 						# Splice happens between codons
 						tryp = trypsinize(translated, 214, 215, True) # this math may be bad
@@ -1962,6 +1962,46 @@ def translate_novels(log_dir, bed_file, logfile):
 		except UnboundLocalError:
 			pass
 
+	f.close()
+	out_fasta.close()
+
+def translate_novels(log_dir, bed_file, logfile):
+	'''In the bed file we read in, the sequences come in pairs - first sequence in the pair is the left gene, second is the right gene.'''
+	
+	translate_table = maketrans("ACGTacgt","TGCAtgca")
+	
+	f = open(log_dir+bed_file,'r')
+	out_fasta = open(log_dir+bed_file+".fasta",'w') # The original QUILTS writes two other files but they're just duplicates of proteome.aa.var.bed and proteome.aa.var.bed.dna, it seems. For now I'm leaving them out.
+	
+	line = 'a'
+	
+	while line:
+		line = f.readline() # header 1
+		second_header = f.readline() # header 2
+		restart_pointer = f.tell() # if it turns out those headers didn't find a sequence in the bed file, we can restart from here in the next line
+		line = f.readline() # buffer
+		upstream = f.readline() # upstream sequence
+		downstream = f.readline() # downstream sequence
+		line = f.readline() # buffer
+		
+		if upstream[0] == '>': # this sequence wasn't found, go backwards. might break for the last entry...
+			f.seek(restart_pointer)		
+		else: # we're good to go
+			seq = upstream.rstrip().split()[-1] + downstream.rstrip().split()[-1]
+			seq = seq.upper()
+			for i in range(3):
+				# Positive strand
+				translated = translate_seq(seq[i:],'+',True)
+				to_write = translated.split('*')[0]
+				if len(to_write) > 16: #must include the junction peptide(s)
+					out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '+'), 'juncN', None, None))
+					out_fasta.write(to_write+'\n')
+				# Negative strand
+				translated = translate_seq(seq[:len(seq)-i], '-', True)
+				to_write = translated.split('*')[0]
+				if len(to_write) > 16:
+					out_fasta.write(format_header('%s-%s%s\n' % (second_header.rstrip(), str(i), '-'), 'juncN', None, None))
+					out_fasta.write(to_write+'\n')
 	f.close()
 	out_fasta.close()
 
