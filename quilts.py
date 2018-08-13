@@ -1324,8 +1324,9 @@ def merge_junction_files(junc_dir, log_dir):
 				begin_ex_1 = beg_int-50-1
 				end_ex_2 = end_int+50+1
 				start_ex_2 = end_int+1-begin_ex_1 
-				w.write("%s\t%d\t%d\tj%d\t%d\t+\t%d\t%d\t0\t2\t50,50\t0,%d\n" % (chr,begin_ex_1,end_ex_2,count,num_observ_map[chr][beg_int][end_int],begin_ex_1,end_ex_2,start_ex_2))
-				count += 1
+				if start_ex_2 > 0:
+					w.write("%s\t%d\t%d\tj%d\t%d\t+\t%d\t%d\t0\t2\t50,50\t0,%d\n" % (chr,begin_ex_1,end_ex_2,count,num_observ_map[chr][beg_int][end_int],begin_ex_1,end_ex_2,start_ex_2))
+					count += 1
 	w.close()
 							
 def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
@@ -1984,6 +1985,9 @@ def translate_novels(log_dir, bed_file, logfile):
 		upstream = f.readline() # upstream sequence
 		downstream = f.readline() # downstream sequence
 		line = f.readline() # buffer
+		
+		if not upstream: # we're done and are going to error out if we don't break now
+			break
 		
 		if upstream[0] == '>': # this sequence wasn't found, go backwards. might break for the last entry...
 			f.seek(restart_pointer)		
