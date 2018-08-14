@@ -79,7 +79,7 @@ for g in genes:
 	gene = genes[g]
 	if gene.exons != {}:
 		wgenes.write('%s\t%s\t%s\t%s\n' % (gene.protein_id,gene.transcript_id,gene.gene_id,gene.gene_name))
-		wdesc.write('%s-%s\t%s\n' % (gene.protein_id, gene.gene_name, gene.gene_desc))
+		wdesc.write('%s\t%s\n' % (gene.protein_id, gene.gene_desc))
 		wbed.write(gene.print_bed_line())
 wgenes.close()
 wdesc.close()

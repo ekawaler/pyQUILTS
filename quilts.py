@@ -938,7 +938,10 @@ def translate(log_dir, bed_file, logfile, seq_type):
 	line = f.readline()
 	while line:
 		spline = line.rstrip().split('\t')
-		desc[spline[0]] = spline[1]
+		if len(spline) > 1:
+			desc[spline[0]] = spline[1]
+		else:
+			desc[spline[0]] = ""
 		line = f.readline()
 	f.close()
 	# Get the gene abbreviations
