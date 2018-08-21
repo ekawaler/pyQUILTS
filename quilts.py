@@ -916,7 +916,7 @@ def format_juncN_header(orig_header):
 	chr = orig_header.split('chr')[1].split('-')[0]
 	reads = orig_header.split('-')[1]
 	frame = orig_header.rstrip().split(')-')[-1]
-	return ">NovelJunc-chr%s-%s-%s|chr=%s|type=novel|site1=%s|site2=%s|reads=%s|frame=%s\n"% (start,chr,end,chr,start,end,reads,frame)
+	return ">NovelJunc-chr%s-%s-%s|chr=%s|type=novel|site1=%s|site2=%s|reads=%s|frame=%s\n"% (chr,start,end,chr,start,end,reads,frame)
 
 def format_header(orig_header,seq_type,abbr,desc):
 	if seq_type=='aa':
@@ -1458,12 +1458,12 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 						alt_match += 1
 						spline[3] = spline[3]+'-'+'-'.join(junctions_alternative[chrm][end_ex_1][beg_ex_2])
 						w3.write('\t'.join(spline)+'\n')
-					elif end_ex_1 in junctions_pos_donors[chrm]:
+					elif chrm in junctions_pos_donors.keys() and end_ex_1 in junctions_pos_donors[chrm]:
 						# The donor splice site is known but the acceptor is completely new (pos strand)
 						donor_match += 1
 						spline[3] = spline[3]+'-'+'-'.join(junctions_pos_donors[chrm][end_ex_1])
 						w4.write('\t'.join(spline)+'\n')
-				elif beg_ex_2 in junctions_neg_donors[chrm]:
+				elif chrm in junctions_neg_donors.keys() and beg_ex_2 in junctions_neg_donors[chrm]:
 					# The donor splice site is known but the acceptor is completely new (neg strand)
 					donor_match += 1
 					spline[3] = spline[3]+'-'+'-'.join(junctions_neg_donors[chrm][beg_ex_2])
@@ -2157,6 +2157,7 @@ if __name__ == "__main__":
 	# We're removing some of the earlier parts for now to expedite testing.
 	if args.junction:
 		write_to_status("Starting on junctions now.")
+		junc_flag = None
 		# If MapSplice was used instead of Tophat, copy its junctions.txt file to 
 		# junctions.bed so the merge_junction_files function will pick up on it
 		if not args.mapsplice:
@@ -2167,7 +2168,8 @@ if __name__ == "__main__":
 				warnings.warn("Could not convert %s/junctions.bed to junctions.txt - check junction bed file location. Skipping..." % args.junction)
 				quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
 		# Merge junction files found in junction folder.
-		junc_flag = merge_junction_files(args.junction, results_folder+'/log')
+		if not junc_flag:
+			junc_flag = merge_junction_files(args.junction, results_folder+'/log')
 		if junc_flag:
 			args.junction = None
 			quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
