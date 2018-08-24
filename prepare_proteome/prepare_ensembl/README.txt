@@ -1,13 +1,16 @@
 
-1. Get your chromosome data files.
+1. Get your info files from Biomart.
 
-	Go to: http://useast.ensembl.org/info/data/ftp/index.html/
+	Go to: http://useast.ensembl.org/biomart/martview/
 
-	In the “Single species data” table, find your species and click the GenBank link in the column “Annotated sequence (GenBank)”
+	Choose the correct database and organism from the dropdown menus.
 
-	Download all of the .dat.gz files here (you can use wget from the command line to do this more efficiently, for example: “wget ftp://ftp.ensembl.org/pub/release-92/genbank/mus_musculus/*”)
+	In the sidebar, under “Attributes”, click the “Structures” radio button and then select the following boxes:
+	-Under GENE: Gene stable ID, Transcript stable ID, Protein stable ID, Gene name, Gene description, Chromosome/Scaffold name, Strand
+	-Under EXON: Exon region start (bp), Exon region end (bp), Exon rank in transcript, Genomic coding start, Genomic coding end
 
-	Unzip the files (“gunzip *.dat.gz”)
+	Hit “Results” on the top left, then export your results to a TSV.
+
 
 2. Get your reference proteome FASTA file.
 
@@ -21,7 +24,7 @@
 
 3. Run the prepare_ensembl.py script:
 
-	python prepare_ensembl.py <directory with your .dat files> <the .pep.all.fa file>
+	python prepare_ensembl.py <the file you downloaded in step 1> <the .pep.all.fa file>
 
 This should output four files: transcriptome.bed, proteome.bed, proteome-genes.txt, proteome-descriptions.txt. 
 

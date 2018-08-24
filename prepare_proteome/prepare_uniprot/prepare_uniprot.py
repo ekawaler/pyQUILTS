@@ -79,7 +79,7 @@ while line:
 		else:
 			g_name = ''
 		g_desc = line.split(' ',1)[1].split('OS=')[0].rstrip()
-		genes.write('%s\t%s\n' % (g_id, g_name))
+		genes.write('%s\t%s\t%s\n' % (g_id, g_id, g_name))
 		desc.write('%s\t%s\n' % (g_id, g_desc))
 		line = f.readline()
 	else:

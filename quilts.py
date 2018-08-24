@@ -377,7 +377,7 @@ def get_variants(vcf_file, proteome_file, type):
 	while line:
 		spline = line.rstrip().split('\t')
 		try:
-			chr, start, name, lengths, offsets = spline[0].lstrip('chr'), int(spline[1]), spline[3], spline[-2], spline[-1]
+			chr, start, name, lengths, offsets = spline[0].lstrip('chr'), int(spline[1]), spline[3], spline[-2].rstrip(','), spline[-1].rstrip(',')
 		except ValueError:
 			# Maybe write this to a log somewhere?
 			warnings.warn("Failed to parse %s" % line)
@@ -834,8 +834,8 @@ def translate_seq(sequence, strand, return_all = False):
 def calculate_chr_pos(map_section):
 	'''Finding the chromosomal position of a variant'''
 	gene_start, strand = int(map_section.split()[0][:-1]),map_section.split()[0][-1]
-	lengths = map(int,map_section.split()[1].split(','))
-	starts = map(int,map_section.split()[2].split(','))
+	lengths = map(int,map_section.split()[1].rstrip(',').split(','))
+	starts = map(int,map_section.split()[2].rstrip(',').split(','))
 	snp = map_section.split()[-1].split('-')[-1]
 	snp_pos = int(re.findall(r'\d+', snp)[0])
 	orig_nt, new_nt = snp.split(str(snp_pos))[0],snp.split(str(snp_pos))[-1]
