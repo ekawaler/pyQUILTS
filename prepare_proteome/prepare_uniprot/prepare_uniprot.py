@@ -88,10 +88,11 @@ else:
 						starts.append(tstart+ex_starts[i]-pstart)
 			spline[1] = str(pstart)
 			spline[2] = str(pend)
+			spline[9] = str(len(lens))
 			spline[10] = ','.join(map(str,lens))
-			spline[11] = ','.join(map(str,starts))
-			
+			spline[11] = ','.join(map(str,starts))			
 			p.write('\t'.join(spline)+'\n')
+			
 	w.close()
 	p.close()
 	f.close()
