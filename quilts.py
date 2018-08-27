@@ -68,7 +68,8 @@ def parse_input_arguments():
 	parser.add_argument('--germline',type=str)
 	parser.add_argument('--somatic',type=str)
 	parser.add_argument('--junction', type=str)
-	parser.add_argument('--mapsplice', action='store_true', default=False, help="Use this if your junctions were created by MapSplice rather than Tophat. Automatically converts the junctions.txt file at the junction location to a file called junctions.bed which can be found by this script.")
+	#parser.add_argument('--mapsplice', action='store_true', default=False, help="Use this if your junctions were created by MapSplice rather than Tophat. Automatically converts the junctions.txt file at the junction location to a file called junctions.bed which can be found by this script.")
+	parser.add_argument('--junction_file_type', choices=['mapsplice','tophat','star'], default='mapsplice', help="which program was used to generate your junction files (options are mapsplice, star, tophat). Defaults to mapsplice")
 	parser.add_argument('--fusion', type=str, help="full path to folder containing fusion file")
 	parser.add_argument('--threshA', type=int, default=2)
 	parser.add_argument('--threshAN', type=int, default=3)
@@ -1284,8 +1285,48 @@ def pull_junc_bed_files(junc_dir):
 			junc_files.append(f)
 	return junc_files
 
+def pull_junc_tab_files(junc_dir):
+	'''Finds all *.tab files in the directory.'''
+	files = os.listdir(junc_dir)
+	junc_files = []
+	for f in files:
+		if f.endswith('.tab'):
+			junc_files.append(f)
+	return junc_files
+
+def convert_star_to_mapsplice(junc_dir):
+	'''Converts STAR junction files into mapsplice format for further processing'''
+	if not os.path.isdir(junc_dir):
+		# No junction files are going to be found. Gotta leave the function.
+		warnings.warn("Unable to open junction folder %s. Giving up on finding splice junctions." % junc_dir)
+		return 1
+	junc_files = pull_junc_tab_files(junc_dir)
+	if len(junc_files) == 0:
+		warnings.warn("Unable to find any .tab files in %s." % junc_dir)
+		return 1
+	w = open(junc_dir+'/junctions.txt','w')
+	count = 0
+	for fil in junc_files:
+		f = open(junc_dir+'/'+fil,'r')
+		for line in f.readlines():
+			spline = line.split()
+			chr = spline[0]
+			start = int(spline[1])-1
+			end = int(spline[2])+1
+			if spline[3] == '2':
+				strand = '-'
+			else:
+				strand = '+'
+			junc_name = "JUNC_%d" % count
+			count += 1
+			reads = spline[6]
+			new_len = end-start+50+1
+			w.write("%s\t%d\t%d\t%s\t%s\t%s\t%d\t%d\t255,0,0\t2\t50,50\t0,%d\n" % (chr, start, end, junc_name, reads, strand, start, end, new_len))
+		f.close()
+	w.close()
+
 def convert_tophat_to_mapsplice(junc_dir):
-	# Tries to pull a list of junction files. Returns with a warning if unable to find any.
+	'''Converts tophat junction files into mapsplice format for further processing'''
 	if not os.path.isdir(junc_dir):
 		# No junction files are going to be found. Gotta leave the function.
 		warnings.warn("Unable to open junction folder %s. Giving up on finding splice junctions." % junc_dir)
@@ -1298,16 +1339,17 @@ def convert_tophat_to_mapsplice(junc_dir):
 	for fil in junc_files:
 		f = open(junc_dir+'/'+fil,'r')
 		for line in f.readlines():
-			spline = line.split()
-			new_start = str(int(spline[1])+int(spline[10].split(',')[0]))
-			new_end = str(int(spline[2])-int(spline[10].split(',')[1])+1)
-			spline[1] = new_start
-			spline[6] = new_start
-			spline[2] = new_end
-			spline[7] = new_end
-			new_len = str(int(new_end)-int(new_start)+int(spline[11].split(',')[1]))
-			spline[11] = spline[11].split(',')[0]+','+new_len
-			w.write('\t'.join(spline)+'\n')
+			if line[0] == 'c':
+				spline = line.split()
+				new_start = str(int(spline[1])+int(spline[10].split(',')[0]))
+				new_end = str(int(spline[2])-int(spline[10].split(',')[1])+1)
+				spline[1] = new_start
+				spline[6] = new_start
+				spline[2] = new_end
+				spline[7] = new_end
+				new_len = str(int(new_end)-int(new_start)+int(spline[11].split(',')[1]))
+				spline[11] = spline[11].split(',')[0]+','+new_len
+				w.write('\t'.join(spline)+'\n')
 		f.close()
 	w.close()
 
@@ -2160,12 +2202,15 @@ if __name__ == "__main__":
 		junc_flag = None
 		# If MapSplice was used instead of Tophat, copy its junctions.txt file to 
 		# junctions.bed so the merge_junction_files function will pick up on it
-		if not args.mapsplice:
-			junc_flag = convert_tophat_to_mapsplice(args.junction)
+		if args.junction_file_type == 'tophat' or args.junction_file_type == 'star':
+			if args.junction_file_type == 'tophat':
+				junc_flag = convert_tophat_to_mapsplice(args.junction)
+			else:
+				junc_flag = convert_star_to_mapsplice(args.junction)
 			if junc_flag:
 				args.junction = None
-				write_to_log("Could not convert junctions.bed to junctions.txt - check junction bed file location", logfile)
-				warnings.warn("Could not convert %s/junctions.bed to junctions.txt - check junction bed file location. Skipping..." % args.junction)
+				write_to_log("Could not convert your junction file - check junction file location and suffix", logfile)
+				warnings.warn("Could not convert your junction file - check junction file location and suffix. Skipping..." % args.junction)
 				quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
 		# Merge junction files found in junction folder.
 		if not junc_flag:
