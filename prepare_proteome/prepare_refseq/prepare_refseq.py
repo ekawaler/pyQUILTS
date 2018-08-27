@@ -13,7 +13,7 @@ for line in f.readlines():
 	if spline[3] != '':
 		trans_map[spline[2]] = spline[3]
 		genes.write('%s\t%s\t%s\n' % (spline[3], spline[2], spline[0].upper()))
-		descriptions.write('%s\t%s\t%s\n' % (spline[3],spline[2],spline[1]))
+		descriptions.write('%s\t%s\n' % (spline[3],spline[1]))
 f.close()
 genes.close()
 descriptions.close()
