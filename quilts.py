@@ -843,7 +843,7 @@ def calculate_chr_pos(map_section):
 	for i in range(len(lengths)):
 		if tot_len+lengths[i] > snp_pos:
 			start_sec = gene_start+starts[i]
-			start_sec += snp_pos-tot_len
+			start_sec += snp_pos-tot_len+1
 			return "%s%d%s" % (orig_nt,start_sec,new_nt)
 		else:
 			tot_len += lengths[i]
@@ -1294,9 +1294,9 @@ def convert_tophat_to_mapsplice(junc_dir):
 	if len(junc_files) == 0:
 		warnings.warn("Unable to find any .bed files in %s." % junc_dir)
 		return 1
-	w = open(junc_dir+'/junctions.txt')
+	w = open(junc_dir+'/junctions.txt','w')
 	for fil in junc_files:
-		f = open(fil,'r')
+		f = open(junc_dir+'/'+fil,'r')
 		for line in f.readlines():
 			spline = line.split()
 			new_start = str(int(spline[1])+int(spline[10].split(',')[0]))
@@ -1305,7 +1305,7 @@ def convert_tophat_to_mapsplice(junc_dir):
 			spline[6] = new_start
 			spline[2] = new_end
 			spline[7] = new_end
-			new_len = str(new_end-new_start+int(spline[11].split(',')[1]))
+			new_len = str(int(new_end)-int(new_start)+int(spline[11].split(',')[1]))
 			spline[11] = spline[11].split(',')[0]+','+new_len
 			w.write('\t'.join(spline)+'\n')
 		f.close()
