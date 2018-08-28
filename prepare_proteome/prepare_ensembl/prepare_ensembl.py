@@ -85,8 +85,7 @@ genes = {}
 
 line = f.readline()
 while line:
-	spline = line.rstrip().split('\t')
-	#if spline[protein_id_pos] != '' and spline[cds_start_pos] != '':
+	spline = line.rstrip('\n').split('\t')
 	gene_name = spline[transcript_id_pos]
 	if gene_name not in genes:
 		new_gene = Gene(spline[chrm_pos], spline[gene_id_pos], spline[protein_id_pos], spline[transcript_id_pos], spline[gene_name_pos], spline[gene_desc_pos], spline[strand_pos])
