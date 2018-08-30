@@ -57,7 +57,7 @@ else:
 			spline[2] = str(int(spline[2])+1)
 			spline[6] = str(int(spline[6])+1)
 			spline[7] = str(int(spline[7])+1)
-			w.write('\t'.join(spline)+'\n')
+			w.write('\t'.join(spline[:12])+'\n')
 			
 			# Fancier stuff for proteome file
 			pstart = int(spline[6])
@@ -91,7 +91,7 @@ else:
 			spline[9] = str(len(lens))
 			spline[10] = ','.join(map(str,lens))
 			spline[11] = ','.join(map(str,starts))			
-			p.write('\t'.join(spline)+'\n')
+			p.write('\t'.join(spline[:12])+'\n')
 			
 	w.close()
 	p.close()
