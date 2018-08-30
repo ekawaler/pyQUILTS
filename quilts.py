@@ -1153,7 +1153,11 @@ def assign_variants(gene, tryptic_peptides, variants, out_file, no_missed_cleava
 			if vars[var][0][0] == '*' and var-1==total_aas+len(peptide):
 				vars_in_peptide.append(var)
 				peptide += '*'+tryptic_peptides[i+1]
-		cur_peptides = write_peptides(gene, {v: vars[v] for v in vars_in_peptide}, total_aas, peptide, out_file)
+		varsmap = {}
+		for v in vars_in_peptide:
+			varsmap[v] = vars[v]
+		cur_peptides = write_peptides(gene, varsmap, total_aas, peptide, out_file)
+		#cur_peptides = write_peptides(gene, {v: vars[v] for v in vars_in_peptide}, total_aas, peptide, out_file)
 		if not no_missed_cleavage:
 			# If we are allowing missed cleavages...
 			write_missed_cleavage_peptides(gene, prev_peptides, cur_peptides, total_aas, out_file)
