@@ -254,7 +254,7 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 			# Also, if there's no QUAL, will it always be a dot? If not, we need to figure out how to deal
 			# If there's no QUAL and there's a dot, make it just over the threshold.
 			try:
-				if spline[5] == '.':
+				if spline[5].rstrip() == '.':
 					spline[5] = quality_threshold+.01
 				chr, pos, id, old, new_array, qual = spline[0].lstrip('chr'), int(spline[1])-1, spline[2], spline[3], spline[4].split(','), float(spline[5])
 			except ValueError:
@@ -413,6 +413,10 @@ def get_variants(vcf_file, proteome_file, type):
 			warnings.warn("Failed to parse %s" % line)
 			line = f.readline()
 			continue
+		if old == '.' or old == '-':
+			old = ''
+		if new == '.' or new == '-':
+			new = ''
 		exon = est.find_exon(chr,pos)
 		if exon != []:
 			# Save pos in chr and pos in gene

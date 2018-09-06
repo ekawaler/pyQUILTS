@@ -53,10 +53,6 @@ else:
 		if line.split()[3].split('-')[0] in kept: # Keeping only SwissProt/TrEMBL
 			# Basic stuff for transcriptome file
 			spline = line.split()
-			spline[1] = str(int(spline[1])+1) # making all the coordinates 1-based instead of 0-based
-			spline[2] = str(int(spline[2])+1)
-			spline[6] = str(int(spline[6])+1)
-			spline[7] = str(int(spline[7])+1)
 			w.write('\t'.join(spline[:12])+'\n')
 			
 			# Fancier stuff for proteome file
