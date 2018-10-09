@@ -1973,7 +1973,7 @@ def merge_and_filter_fusion_files(fusion_dir, result_dir):
 	# Tries to pull a list of junction files. Returns with a warning if unable to find any.
 	if not os.path.isdir(fusion_dir):
 		# No junction files are going to be found. Gotta leave the function.
-		warnings.warn("Unable to open fusion folder %s. Giving up on finding gene fusions." % junc_dir)
+		warnings.warn("Unable to open fusion folder %s. Giving up on finding gene fusions." % fusion_dir)
 		return 1
 	fusion_files = pull_fusion_files(fusion_dir)
 	if len(fusion_files) == 0:
