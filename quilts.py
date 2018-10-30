@@ -2028,7 +2028,7 @@ def create_fusion_bed(result_dir):
 		else:
 			first_chr_pos -= 1
 			first_chr_start = first_chr_pos+50
-		w.write("%s\t%d\t%d\t%s\t0\t%s\t%d\t%d\t0\t1\t50\t0\n" % (first_chr,min(first_chr_start, first_chr_pos),max(first_chr_start, first_chr_pos),fus_name,first_chr_strand,min(first_chr_start, first_chr_pos),max(first_chr_start, first_chr_pos)))
+		w.write("chr%s\t%d\t%d\t%s\t0\t%s\t%d\t%d\t0\t1\t50\t0\n" % (first_chr,min(first_chr_start, first_chr_pos),max(first_chr_start, first_chr_pos),fus_name,first_chr_strand,min(first_chr_start, first_chr_pos),max(first_chr_start, first_chr_pos)))
 		# ...and 50 after the right
 		second_chr = spline[2].split(':')[0]
 		second_chr_pos = int(spline[2].split(':')[1])
@@ -2038,7 +2038,7 @@ def create_fusion_bed(result_dir):
 			second_chr_end = second_chr_pos+50
 		else:
 			second_chr_end = second_chr_pos-50
-		w.write("%s\t%d\t%d\t%s\t0\t%s\t%d\t%d\t0\t1\t50\t0\n" % (second_chr,min(second_chr_end, second_chr_pos),max(second_chr_end, second_chr_pos),fus_name,second_chr_strand,min(second_chr_end, second_chr_pos),max(second_chr_end, second_chr_pos)))
+		w.write("chr%s\t%d\t%d\t%s\t0\t%s\t%d\t%d\t0\t1\t50\t0\n" % (second_chr,min(second_chr_end, second_chr_pos),max(second_chr_end, second_chr_pos),fus_name,second_chr_strand,min(second_chr_end, second_chr_pos),max(second_chr_end, second_chr_pos)))
 		
 		line = f.readline()
 		
