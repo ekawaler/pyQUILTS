@@ -1347,8 +1347,9 @@ def convert_tophat_to_mapsplice(junc_dir):
 	for fil in junc_files:
 		f = open(junc_dir+'/'+fil,'r')
 		for line in f.readlines():
-			if line[0] == 'c':
+			if len(line.split('\t')) > 11:
 				spline = line.split()
+				spline[0] = 'chr'+spline[0].lstrip('chr')
 				new_start = str(int(spline[1])+int(spline[10].split(',')[0]))
 				new_end = str(int(spline[2])-int(spline[10].split(',')[1])+1)
 				spline[1] = new_start
