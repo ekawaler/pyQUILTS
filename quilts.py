@@ -2020,7 +2020,7 @@ def create_fusion_bed(result_dir):
 		# FASTA header: fusion name, left break, right break, JRC
 		fus_name = '%s|leftBreak=%s|rightBreak=%s|junctionReadCount=%s' % (spline[0], spline[1], spline[2], spline[4])
 		# Grab 50 bases before the left breakpoint
-		first_chr = spline[1].split(':')[0]
+		first_chr = spline[1].split(':')[0].lstrip('chr')
 		first_chr_pos = int(spline[1].split(':')[1])
 		first_chr_strand = spline[1].split(':')[2]
 		if first_chr_strand == '+':
@@ -2030,7 +2030,7 @@ def create_fusion_bed(result_dir):
 			first_chr_start = first_chr_pos+50
 		w.write("chr%s\t%d\t%d\t%s\t0\t%s\t%d\t%d\t0\t1\t50\t0\n" % (first_chr,min(first_chr_start, first_chr_pos),max(first_chr_start, first_chr_pos),fus_name,first_chr_strand,min(first_chr_start, first_chr_pos),max(first_chr_start, first_chr_pos)))
 		# ...and 50 after the right
-		second_chr = spline[2].split(':')[0]
+		second_chr = spline[2].split(':')[0].lstrip('chr')
 		second_chr_pos = int(spline[2].split(':')[1])
 		second_chr_strand = spline[2].split(':')[2]
 		if second_chr_strand == '+':
@@ -2053,27 +2053,44 @@ def translate_fusions(result_dir):
 	f = open(result_dir+'/log/fusions.bed.dna','r')
 	w = open(result_dir+'/log/fusions.fasta','w')
 	# We want to take the 4th line and every 5th line after that (that's the line with the 50 bases we want to keep, the rest is various buffers and metadata stuff)
-	pos = 2
-	second = False
+	second = False # Flag indicating we're on the right gene (as opposed to the left)
+	failstate = False # Flag indicating one of the genes didn't make it to the .bed.dna file, usually due to a missing chromosome file like chrUn_gl000228.fa.cmp1
 	seq = ""
 	line = f.readline()
+	pos = 2
 	while line:
+		if pos%4 == 0: # Check to make sure the sequences made it to the .bed.dna file
+			if len(line.split()[0].split('|')) == 1:
+				failstate = True
+				pos = 2
+				if second:
+					second = False
+					failstate = False
+					seq = ""
+				else:
+					second = True
 		if pos%5 == 0:
+			if len(line.split()) < 6:
+				print line
 			if line.split()[5] == '-':
 				seq += line.rstrip().split()[-1][::-1].translate(translate_table)
 			else:
 				seq += line.rstrip().split()[-1]
 			if second:
-				seq = seq.upper()
-				for i in range(0,3):
-					w.write('>%s|%d+\n' % (line.split()[0],i))
-					w.write('%s\n' % translate_seq(seq[i:], '+', True))
-					w.write('>%s|%d-\n' % (line.split()[0],i))
-					w.write('%s\n' % translate_seq(seq[:len(seq)-i], '-', True))
+				if not failstate:
+					seq = seq.upper()
+					for i in range(0,3):
+						w.write('>%s|%d+\n' % (line.split()[0],i))
+						w.write('%s\n' % translate_seq(seq[i:], '+', True))
+						w.write('>%s|%d-\n' % (line.split()[0],i))
+						w.write('%s\n' % translate_seq(seq[:len(seq)-i], '-', True))
 				second = False
+				failstate = False
 				seq = ""
 			else:
 				second = True
+			pos = 0
+		print pos, line
 		line = f.readline()
 		pos += 1
 
