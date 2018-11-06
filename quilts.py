@@ -255,8 +255,8 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 			# If there's no QUAL and there's a dot, make it just over the threshold.
 			try:
 				if spline[5].rstrip() == '.':
-					spline[5] = quality_threshold+.01
-				chr, pos, id, old, new_array, qual = spline[0].lstrip('chr'), int(spline[1])-1, spline[2], spline[3], spline[4].split(','), float(spline[5])
+					spline[5] = str(quality_threshold+.01)
+				chr, pos, id, old, new_array, qual = spline[0].lstrip('chr'), int(spline[1])-1, spline[2], spline[3], spline[4].split(','), eval(spline[5])
 			except ValueError:
 				write_to_log("Error parsing: "+line.rstrip(), vcf_log_location)
 				line = f.readline()
@@ -275,7 +275,7 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 				# Is there a higher-quality version of this variant already found?
 				line_map_key = "%s#%d#%s#%s" % (chr, pos, old, new)
 				if line_map_key in existing_variants:
-					if existing_variants[line_map_key][5] > qual:
+					if eval(existing_variants[line_map_key][5]) > qual:
 						duplicates_removed += 1
 						continue
 					else:
@@ -284,7 +284,7 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 				# Passed the other checks? Cool, store the first six fields in our map and continue.
 				# Overwrite the duplicate if it exists.
 				kept_variants += 1
-				existing_variants[line_map_key] = [chr, pos, id, old, new, qual]
+				existing_variants[line_map_key] = [chr, pos, id, old, new, spline[5]]
 
 			line = f.readline()
 
@@ -407,7 +407,7 @@ def get_variants(vcf_file, proteome_file, type):
 	while line:
 		spline = line.rstrip().split('\t')
 		try:
-			chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1]), spline[2], spline[3], spline[4], float(spline[5])
+			chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1]), spline[2], spline[3], spline[4], spline[5]
 		except ValueError:
 			# Maybe write this to a log somewhere?
 			warnings.warn("Failed to parse %s" % line)
@@ -422,8 +422,8 @@ def get_variants(vcf_file, proteome_file, type):
 			# Save pos in chr and pos in gene
 			# Each exon returned is a [name, position in gene] pair
 			for ex in exon:
-				in_chr = "%s-%s%d%s:%f" % (type, old, pos, new, qual) 
-				in_gene = "%s-%s%d%s:%f" % (type, old, ex[1], new, qual) 
+				in_chr = "%s-%s%d%s:%s" % (type, old, pos, new, qual) 
+				in_gene = "%s-%s%d%s:%s" % (type, old, ex[1], new, qual) 
 				try:
 					all_genes[ex[0]].append([in_chr, in_gene])
 				except KeyError:
@@ -981,7 +981,7 @@ def translate(log_dir, bed_file, logfile, seq_type):
 						prev_AA_subst = []
 					if AA_subst not in prev_AA_subst:
 						translated = translate_seq(sequence.upper(), strand)
-						out_fasta.write(format_header(second_header, seq_type, abbr[gene], desc[gene]))
+						out_fasta.write(format_header(second_header, seq_type, abbr[gene.split(':')[0]], desc[gene.split(':')[0]]))
 						#out_fasta.write(second_header)
 						out_fasta.write(translated+'\n')
 					prev_AA_subst.append(AA_subst)
@@ -1016,7 +1016,7 @@ def translate(log_dir, bed_file, logfile, seq_type):
 		try:
 			if prev_gene != gene or AA_subst != prev_AA_subst:
 				translated = translate_seq(sequence.upper(), strand)
-				out_fasta.write(format_header(second_header, seq_type, abbr[gene], desc[gene]))
+				out_fasta.write(format_header(second_header, seq_type, abbr[gene.split(':')[0]], desc[gene.split(':')[0]]))
 				out_fasta.write(translated+'\n')
 		except UnboundLocalError:
 			pass
