@@ -53,7 +53,7 @@ else:
 		if line.split()[3].split('-')[0] in kept: # Keeping only SwissProt/TrEMBL
 			# Basic stuff for transcriptome file
 			spline = line.split()
-			spline[3] = spline[3].replace('-',':')
+			spline[3] = spline[3].replace('-','@')
 			w.write('\t'.join(spline[:12])+'\n')
 			
 			# Fancier stuff for proteome file
@@ -109,7 +109,7 @@ genes = {}
 line = f.readline()
 while line:
 	spline = line.split('\t')
-	uid = spline[entry_pos].replace('-',':')
+	uid = spline[entry_pos].replace('-','@')
 	pn = spline[prot_pos]
 	gn = spline[gene_pos]
 	if gn != '\n':

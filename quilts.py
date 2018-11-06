@@ -981,7 +981,7 @@ def translate(log_dir, bed_file, logfile, seq_type):
 						prev_AA_subst = []
 					if AA_subst not in prev_AA_subst:
 						translated = translate_seq(sequence.upper(), strand)
-						out_fasta.write(format_header(second_header, seq_type, abbr[gene.split(':')[0]], desc[gene.split(':')[0]]))
+						out_fasta.write(format_header(second_header, seq_type, abbr[gene.split('@')[0]], desc[gene.split('@')[0]]))
 						#out_fasta.write(second_header)
 						out_fasta.write(translated+'\n')
 					prev_AA_subst.append(AA_subst)
@@ -1016,7 +1016,7 @@ def translate(log_dir, bed_file, logfile, seq_type):
 		try:
 			if prev_gene != gene or AA_subst != prev_AA_subst:
 				translated = translate_seq(sequence.upper(), strand)
-				out_fasta.write(format_header(second_header, seq_type, abbr[gene.split(':')[0]], desc[gene.split(':')[0]]))
+				out_fasta.write(format_header(second_header, seq_type, abbr[gene.split('@')[0]], desc[gene.split('@')[0]]))
 				out_fasta.write(translated+'\n')
 		except UnboundLocalError:
 			pass
