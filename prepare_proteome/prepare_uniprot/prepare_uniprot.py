@@ -8,7 +8,7 @@ parser = argparse.ArgumentParser(description="Prepare Proteome Reference")
 parser.add_argument('--bed_file', type=str, help="Name of your UniProt .bed file (step 1A in the README)", required=True)
 parser.add_argument('--input_fasta', type=str, help="Name of your .fasta file (step 1B in the README)", required=True)
 parser.add_argument('--info_file', type=str, help="Name of your .tab info file (step 1C in the README)", required=True)
-parser.add_argument('--version', type=str, default="swiss", help="Version of UniProt to use (either 'swiss', 'trembl', or 'both')", choices=['swiss','trembl','both'], required=True)
+parser.add_argument('--version', type=str, default="swiss", help="Version of UniProt to use (either 'swiss', 'trembl', or 'both'; defaults to 'swiss')", choices=['swiss','trembl','both'])
 
 args = parser.parse_args()
 
@@ -53,6 +53,7 @@ else:
 		if line.split()[3].split('-')[0] in kept: # Keeping only SwissProt/TrEMBL
 			# Basic stuff for transcriptome file
 			spline = line.split()
+			spline[3] = spline[3].replace('-','.')
 			w.write('\t'.join(spline[:12])+'\n')
 			
 			# Fancier stuff for proteome file
@@ -102,7 +103,7 @@ header = f.readline().rstrip().split('\t')
 entry_pos = header.index("Entry")
 prot_pos = header.index("Protein names")
 gene_pos = header.index("Gene names")
-print header
+#print header
 genes = {}
 
 line = f.readline()
@@ -110,7 +111,7 @@ while line:
 	spline = line.split('\t')
 	uid = spline[entry_pos]
 	pn = spline[prot_pos]
-	gn = spline[gene_pos]
+	gn = spline[gene_pos].replace('-','.')
 	if gn != '\n':
 		gn = gn.split()[0]
 	else:
