@@ -25,3 +25,5 @@ FusionName	LeftBreakpoint	RightBreakpoint	Sample	JunctionReadCount
 GENE1—GENE2	chr19:1000000:-	chr16:500003:+	Sample1	5
 
 You can threshold on JunctionReadCount, though that’s not an option - you have to go into the code to do it. In addition, you’re welcome to have whatever other columns you’d like after the first five.
+
+An explainer for the headers in the output fasta can be found in OUTPUT FASTA HEADER KEY.txt

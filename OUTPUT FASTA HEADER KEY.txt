@@ -1,0 +1,23 @@
+SINGLE AMINO ACID VARIANT
+>NP_004530-R138H|asparagine--tRNA ligase, cytoplasmic|GN=NARS|chr=18|type=S|SNP=C57613610T|qual=0.01|SAAP=R138H
+Identifier (Accession Number-AA Substitution) | Gene Description | Gene Name | Chromosome Number | Type S (somatic) or G (germline) | Nucleotide Substitution | Quality | AA Substitution
+
+INSERTION/DELETION
+>NP_055459-T148960746|myomegalin isoform 1|GN=PDE4DIP|chr=1|type=G|indel=T148960746|qual=0.01
+Identifier (Accession Number-Nucleotide Substitution) | Gene Description | Gene Name | Chromosome Number | Type S (somatic) or G (germline) | Nucleotide Substitution | Quality
+
+ALTERNATIVE SPLICE JUNCTION: BOTH DONOR AND ACCEPTOR SITES CONSERVED
+>NP_938073-bothJunc-chr1-963253-963920|kelch-like protein 17|GN=KLHL17|chr=1|strand=+|type=bothConserved|donorExon=7|donorSite=963253|acceptorExon=9|acceptorSite=963920|reads=6
+Identifier (Accession Number-Junction Type-Chromosome-Donor Site - Acceptor Site) | Gene Description | Gene Name | Chromosome | Strand | Junction Type (bothConserved) | Donor Exon Number | Donor Site Coordinate | Acceptor Exon Number | Acceptor Site Coordinate | Number of Supporting Reads
+
+ALTERNATIVE SPLICE JUNCTION: ONLY DONOR SITE CONSERVED
+>NP_056473-donorJunc-chr1-954523-955923|nucleolar complex protein 2 homolog|GN=NOC2L|chr=1|strand=-|type=donorConserved|donorExon=6|donorSite=955923|acceptorSite=954523|reads=9
+Identifier (Accession Number-Junction Type-Chromosome-Donor Site - Acceptor Site) | Gene Description | Gene Name | Chromosome | Strand | Junction Type (donorConserved) | Donor Exon Number | Donor Site Coordinate | Acceptor Site Coordinate | Number of Supporting Reads
+
+ALTERNATIVE SPLICE JUNCTION: NOVEL
+>NovelJunc-chr1-18379-18913|chr=1|type=novel|site1=18379|site2=18913|reads=5|frame=0+
+Identifier (Junction Type-Chromosome-Site 1-Site 1) | Chromosome | Junction Type (novel) | Boundary Site 1 Coordinate | Boundary Site 2 Coordinate | Number of Supporting Reads | Reading Frame (one of 0+,0-,1+,1-,2+,2-; we translate novel junctions in all six reading frames)
+
+GENE FUSION
+>DNAJC10--ARHGEF12|leftBreak=chr2:182728994:+|rightBreak=chr11:120431771:+|junctionReadCount=1|0+
+Identifier (Fusion Gene 1--Fusion Gene 2) | Left Break Site (chromosome:coordinate:strand) | Right Break Site (chromosome:coordinate:strand) | Junction Read Count | Reading Frame (one of 0+,0-,1+,1-,2+,2-; we translate novel junctions in all six reading frames)
