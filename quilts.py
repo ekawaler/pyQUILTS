@@ -561,7 +561,8 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 			# Now we're just checking whether the old and new AAs are different. Leaving stop codon things in...
 			if AA_old != AA_new:
 				# G-A2158G:2281.770000
-				change = "X-%s%d%s:0.0" % (triplet_orig, triplet_start, triplet_new)
+				# Make this somatic or germline, whichever the most recent variant was. Could conceivably do this better
+				change = "%s-%s%d%s:0.0" % (var.split('-')[0],triplet_orig, triplet_start, triplet_new)
 				changes.append(change)
 				if reverse_flag:
 					total_AA = len(full_seq)/3
