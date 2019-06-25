@@ -1,7 +1,7 @@
 
 1. Get your info files from Biomart.
 
-	Go to: http://useast.ensembl.org/biomart/martview/
+	Go to: http://useast.ensembl.org/biomart/martview/ (for Hg37, go to http://feb2014.archive.ensembl.org/biomart/martview/)
 
 	Choose the correct database and organism from the dropdown menus.
 
