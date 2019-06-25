@@ -413,6 +413,10 @@ def get_variants(vcf_file, proteome_file, type):
 			warnings.warn("Failed to parse %s" % line)
 			line = f.readline()
 			continue
+		if not valid_nucleotides(new) or not valid_nucleotides(old):
+			warnings.warn("Failed to parse %s" % line)
+			line = f.readline()
+			continue
 		if old == '.' or old == '-':
 			old = ''
 		if new == '.' or new == '-':
@@ -447,6 +451,12 @@ def get_variants(vcf_file, proteome_file, type):
 			in_gene.append(var[1])
 		w.write("%s\t%s\t%s\n" % (key, ','.join(in_chr), ','.join(in_gene)))
 	w.close()
+
+def valid_nucleotides(strg, search=re.compile(r'[^ACGTU\.\-.]').search):
+	'''Thanks, Stack Overflow user! Use this to make sure the variant we're given contains
+	only nucleotide letters - found a MAF file that sometimes put "TRUE" in there because
+	people are jerks and you can only trust yourself'''
+	return not bool(search(strg))
 
 ### These functions are used to sort variants by type.
 
