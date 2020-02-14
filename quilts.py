@@ -572,12 +572,14 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 			if AA_old != AA_new:
 				# G-A2158G:2281.770000
 				# Make this somatic or germline, whichever the most recent variant was. Could conceivably do this better
-				change = "%s-%s%d%s:0.0" % (var.split('-')[0],triplet_orig, triplet_start, triplet_new)
-				changes.append(change)
 				if reverse_flag:
+					change = "%s-%s%d%s:0.0" % (var.split('-')[0],triplet_orig[::-1].translate(translate_table), triplet_start, triplet_new[::-1].translate(translate_table))
+					changes.append(change)
 					total_AA = len(full_seq)/3
 					aa_substs.append((AA_old, total_AA-(pos/3), AA_new))
 				else:
+					change = "%s-%s%d%s:0.0" % (var.split('-')[0],triplet_orig, triplet_start, triplet_new)
+					changes.append(change)
 					aa_substs.append((AA_old, pos/3+1, AA_new))
 		prev_start = triplet_start
 		prev_subst = [subst_pos, triplet_subst]
@@ -2082,8 +2084,8 @@ def translate_fusions(result_dir):
 				else:
 					second = True
 		if pos%5 == 0:
-			if len(line.split()) < 6:
-				print line
+			#if len(line.split()) < 6:
+			#	print line
 			if line.split()[5] == '-':
 				seq += line.rstrip().split()[-1][::-1].translate(translate_table)
 			else:
@@ -2102,7 +2104,7 @@ def translate_fusions(result_dir):
 			else:
 				second = True
 			pos = 0
-		print pos, line
+		#print pos, line
 		line = f.readline()
 		pos += 1
 
