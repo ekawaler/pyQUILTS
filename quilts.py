@@ -42,6 +42,7 @@ from itertools import product
 
 # ahhhh look at these hideous global variables
 global logfile
+global referrorfile
 global statusfile
 global results_folder
 global codon_map
@@ -56,19 +57,12 @@ def parse_input_arguments():
 	# full paths are a pain but they're more flexible.
 	# Also, at some point, make some of these arguments not optional.
 	parser = argparse.ArgumentParser(description="QUILTS") # What even is this description for, anyway? Maybe I'll remove it eventually
-	#parser.add_argument('--output_dir', type=str, default="/ifs/data/proteomics/tcga/scripts/quilts/pyquilts", help="full path to output folder")
-	#parser.add_argument('--proteome', type=str, default="/ifs/data/proteomics/tcga/databases/refseq_human_20160914", help="full path to folder containing reference proteome")
-	#parser.add_argument('--genome', type=str, default="/ifs/data/proteomics/tcga/databases/genome_human", help="full path to folder containing reference genome")
 	parser.add_argument('--output_dir', type=str, default=".", help="full path to output folder")
 	parser.add_argument('--proteome', type=str, default=".", help="full path to folder containing reference proteome")
 	parser.add_argument('--genome', type=str, default=".", help="full path to folder containing reference genome")
-	#parser.add_argument('--somatic', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna/vcf/TCGA-20130502-S", help="VCF file of somatic variants")
-	#parser.add_argument('--germline', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/dna-germline/vcf/GATK26-G-Nature", help="VCF file of germline variants")
-	#parser.add_argument('--junction', type=str, default="/ifs/data/proteomics/tcga/samples/breast/TCGA-E2-A15A/rna/tophat/junction_tophat208bowtie2_gMx", help="BED file of splice junctions [in progress]")
 	parser.add_argument('--germline',type=str)
 	parser.add_argument('--somatic',type=str)
 	parser.add_argument('--junction', type=str)
-	#parser.add_argument('--mapsplice', action='store_true', default=False, help="Use this if your junctions were created by MapSplice rather than Tophat. Automatically converts the junctions.txt file at the junction location to a file called junctions.bed which can be found by this script.")
 	parser.add_argument('--junction_file_type', choices=['mapsplice','tophat','star'], default='mapsplice', help="which program was used to generate your junction files (options are mapsplice, star, tophat). Defaults to mapsplice")
 	parser.add_argument('--fusion', type=str, help="full path to folder containing fusion file")
 	parser.add_argument('--threshA', type=int, default=2)
@@ -80,7 +74,6 @@ def parse_input_arguments():
 	# Pull out the arguments
 	args = parser.parse_args()
 	# Check that we have a somatic and/or germline and/or junction file. Abort if not.
-	# Will add fusion to this check later.
 	if not args.somatic and not args.germline and not args.junction and not args.fusion:
 		raise SystemExit("ERROR: Must have at least one variant file (somatic, germline, fusion, and/or junctions).\nAborting program.")
 	
@@ -95,6 +88,7 @@ def set_up_output_dir(output_dir, args):
 	# I hate this global variable stuff but is there another way to do it
 	# without having to pass the logfile/statusfile to all the functions so they can be used?
 	global logfile
+	global referrorfile
 	global statusfile
 	global results_folder
 	
@@ -120,8 +114,10 @@ def set_up_output_dir(output_dir, args):
 	# and writes the starting date and time to them.
 	logfile = results_folder+'/log.txt'	
 	statusfile = results_folder+'/status.txt'
+	referrorfile = results_folder+'/reference_mismatches.txt'
 	write_to_log("Logfile created: "+str(today), logfile)
 	write_to_status("Status file created: "+str(today))
+	write_to_log("Reference mismatches file created: "+str(today), referrorfile)
 	
 	# Creates some folders within the results folder
 	# Currently just copying what's in the Perl version.
@@ -308,7 +304,26 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 	vcf_log.close()
 	return None
 
-### This function removes any duplicate germline/somatic variants from the somatic file.
+### This function saves the proteome as a map for quality checks.
+def save_ref_prot(ref_prot_loc):
+	ref_prot = {}
+	f = open(ref_prot_loc,'r')
+	header = f.readline()
+	seq = ''
+	line = f.readline()
+	while line:
+		if line[0] == '>':
+			ref_prot[header.split()[0].split('.')[0][1:]] = seq
+			header = line
+			seq = ''
+			line = f.readline()
+		else:
+			seq += line.rstrip()
+			line = f.readline()
+	ref_prot[header.split()[0].split('.')[0][1:]] = seq # the last one
+	return ref_prot
+
+### This function removes any duplicate germline or somatic variants from the somatic file.
 
 def remove_somatic_duplicates(germ_dir, som_dir):
 	'''Removes duplicate germline/somatic variants from the somatic file.'''
@@ -460,10 +475,12 @@ def valid_nucleotides(strg, search=re.compile(r'[^ACGTU\.\-.]').search):
 
 ### These functions are used to sort variants by type.
 
-def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
-	'''Checks all variants in a gene for whether or not they cause a single-AA non-stop substitution. Returns a list of the ones that do, and the AA substitutions they cause.'''
+def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, ref_prot):
+	'''Checks all variants in a gene for whether or not they cause a single-AA non-stop substitution. 
+	Returns a list of the ones that do, and the AA substitutions they cause.'''
 	global codon_map
 	global logfile
+	global referrorfile
 	
 	# Ready the translation table for the reverse strand.
 	translate_table = maketrans("ACGTacgt","TGCAtgca")
@@ -544,12 +561,24 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 		#if AA_old != AA_new and AA_new != '*' and AA_old != '*':
 		# Now we're just checking whether the old and new AAs are different. Leaving stop codon things in...
 		if AA_old != AA_new:
-			changes.append(var)
 			if reverse_flag:
 				total_AA = len(full_seq)/3
-				aa_substs.append((AA_old, total_AA-(pos/3), AA_new))
+				position = total_AA-(pos/3)
 			else:
-				aa_substs.append((AA_old, pos/3+1, AA_new))
+				position = pos/3+1
+			
+			try:
+				orig_seq = ref_prot[header_line.split('\t')[3]]
+				if orig_seq[position-1] == AA_old:
+					changes.append(var)
+					aa_substs.append((AA_old, position, AA_new))
+				else:
+					write_to_log("Original AA at position %d in %s not what we expected [expected %s, found %s], skipping..." % (position, header_line.split('\t')[3], AA_old, orig_seq[position-1]), referrorfile)
+			except KeyError:
+				write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
+			except IndexError: # deal with this later
+				write_to_log("Protein %s not expected length, skipping..." % header_line.split('\t')[3], referrorfile)
+
 		# If the new codon is a stop codon, 
 		# uh...I found this comment here and it looks like I decided not to do whatever I was planning to do.
 		
@@ -565,8 +594,6 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 				triplet_new = triplet_new[::-1].translate(translate_table)
 			AA_old = codon_map[triplet_orig]
 			AA_new = codon_map[triplet_new]
-			#print header_line.split('\t')[3]+'\t'+var+'\t'+str(prev_subst[0])+'\t'+prev_subst[1]+'\t'+triplet_orig+'\t'+triplet_new+'\t'+full_seq[subst_pos-3:subst_pos+6]
-			#print full_seq
 			#if AA_old != AA_new and AA_new != '*' and AA_old != '*':
 			# Now we're just checking whether the old and new AAs are different. Leaving stop codon things in...
 			if AA_old != AA_new:
@@ -574,13 +601,23 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants):
 				# Make this somatic or germline, whichever the most recent variant was. Could conceivably do this better
 				if reverse_flag:
 					change = "%s-%s%d%s:0.0" % (var.split('-')[0],triplet_orig[::-1].translate(translate_table), triplet_start, triplet_new[::-1].translate(translate_table))
-					changes.append(change)
 					total_AA = len(full_seq)/3
-					aa_substs.append((AA_old, total_AA-(pos/3), AA_new))
+					position = total_AA-(pos/3)
 				else:
 					change = "%s-%s%d%s:0.0" % (var.split('-')[0],triplet_orig, triplet_start, triplet_new)
-					changes.append(change)
-					aa_substs.append((AA_old, pos/3+1, AA_new))
+					position = pos/3+1
+				try:
+					orig_seq = ref_prot[header_line.split('\t')[3]]
+					if orig_seq[position-1] == AA_old:
+						changes.append(change)
+						aa_substs.append((AA_old, position, AA_new))
+					else:
+						write_to_log("Original AA at position %d in %s not what we expected [expected %s, found %s], skipping..." % (position, header_line.split('\t')[3], AA_old, orig_seq[position-1]), referrorfile)
+				except KeyError:
+					write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
+				except IndexError: # deal with this later
+					write_to_log("Protein %s not expected length, skipping..." % header_line.split('\t')[3], referrorfile)
+
 		prev_start = triplet_start
 		prev_subst = [subst_pos, triplet_subst]
 	return changes, aa_substs, indels	
@@ -711,7 +748,7 @@ def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, ou
 			seq_length += chunk_length
 		out_indel_bed_dna.write('\t'.join(exon_headers[-1])) # Post-sequence	
 
-def sort_variants(proteome_file, variant_file, output_prefix):
+def sort_variants(proteome_file, variant_file, output_prefix, ref_prot):
 	'''Goes through the variants and sorts them by type, writing out a bunch of intermediate files in the process. Right now the types are "single-AA non-stop variant" and "not that", but eventually will have more.'''
 	global codon_map
 	
@@ -756,7 +793,7 @@ def sort_variants(proteome_file, variant_file, output_prefix):
 			# Using a try/except block here to deal with the possibility of this being the first line
 			# There has to be a more graceful way to do that, right?
 			try:
-				changed_vars, aa_substs, indels = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
+				changed_vars, aa_substs, indels = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []), ref_prot)
 				if changed_vars != []:
 					write_out_aa(name, changed_vars, aa_substs, out_aa)
 					write_out_aa_bed(header_line.split('\t'), changed_vars, out_aa_bed)
@@ -788,7 +825,7 @@ def sort_variants(proteome_file, variant_file, output_prefix):
 		
 	# Do the last one
 	try:
-		changed_vars, aa_substs, indels = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []))
+		changed_vars, aa_substs, indels = process_gene(header_line, second_header, exon_headers, exon_seqs, variants_map.get(name, []), ref_prot)
 		if changed_vars != []:
 			write_out_aa(name, changed_vars, aa_substs, out_aa)
 			write_out_aa_bed(header_line.split('\t'), changed_vars, out_aa_bed)
@@ -813,7 +850,28 @@ def sort_variants(proteome_file, variant_file, output_prefix):
 	out_indel_bed.close()
 	out_indel_bed_dna.close()
 	out_other.close()
+
+def tabulate_ref_mismatches():
+	'''Opens up the reference mismatch folder and counts them up to add to the logfile'''
+	global logfile
+	global referrorfile
+
+	missing_prots = set([])
+	mismatch_prots = set([])
+	rerf = open(referrorfile,'r')
+	for line in rerf.readlines():
+		if line.split()[0] == 'Protein':
+			missing_prots.add(line.split()[1])
+		elif line.split()[0] == "Original":
+			mismatch_prots.add(line.split()[6])
+	rerf.close()
 	
+	mismatches = str(len(mismatch_prots))
+	missings = str(len(missing_prots))
+
+	write_to_log("%d proteins not found in reference" % (len(missing_prots)),logfile)
+	write_to_log("%d proteins do not match between the transcriptome and the proteome reference" % (len(mismatch_prots)),logfile)
+
 ### These functions are used to translate DNA variants into variant proteins.
 
 def translate_seq(sequence, strand, return_all = False):
@@ -2093,10 +2151,14 @@ def translate_fusions(result_dir):
 			if second:
 				if not failstate:
 					seq = seq.upper()
+					fus_id = line.split()[0].split('|')[0]
+					fus_info = line.split()[0].split('|',1)[-1]
 					for i in range(0,3):
-						w.write('>%s|%d+\n' % (line.split()[0],i))
+						#w.write('>%s|%d+\n' % (line.split()[0],i))
+						w.write('>%s-%d+|%s|%d+\n' % (fus_id, i, fus_info,i))
 						w.write('%s\n' % translate_seq(seq[i:], '+', True))
-						w.write('>%s|%d-\n' % (line.split()[0],i))
+						#w.write('>%s|%d-\n' % (line.split()[0],i))
+						w.write('>%s-%d-|%s|%d-\n' % (fus_id, i, fus_info,i))
 						w.write('%s\n' % translate_seq(seq[:len(seq)-i], '-', True))
 				second = False
 				failstate = False
@@ -2214,10 +2276,14 @@ if __name__ == "__main__":
 
 	# Finish out the variants, if there are any	
 	if args.somatic or args.germline:
+		# Prep a map of the reference proteome for quality checks
+		ref_prot = save_ref_prot(results_folder+"/fasta/reference_proteome.fasta")
+
 		# Combine (some more) and sort variants.
 		# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
 		# I will continue to do this, probably? I'll just ignore more later on
-		sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var", "proteome")
+		sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var", "proteome", ref_prot)
+		tabulate_ref_mismatches()
 		write_to_status("Variants sorted")	
 
 		# Translate the variant sequences into a fasta file.
@@ -2297,12 +2363,9 @@ if __name__ == "__main__":
 			translate(results_folder+"/log/", "alternative.bed.dna", logfile, 'juncA')
 			translate(results_folder+"/log/", "donor.bed.dna", logfile, 'juncAN')
 			# Six-frame translations
-			#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/results_20171116.144632/log/novel_splices.bed.dna', results_folder+'/log/novel_splices.bed.dna')
 			translate_novels(results_folder+"/log/", "novel.bed.dna", logfile)
 		
 			# Move junctions to results folder
-			#shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative.fasta")
-			#shutil.copy(results_folder+"/log/alternative_frameshift.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_frameshift.fasta")
 			shutil.copy(results_folder+"/log/alternative.bed.dna.fasta", results_folder+"/fasta/parts/proteome.alternative_splices.fasta")
 			with open(results_folder+"/log/donor.bed.dna.fasta", 'r') as src:
 				with open(results_folder+"/fasta/parts/proteome.alternative_splices.fasta",'a') as dest:
