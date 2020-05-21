@@ -109,7 +109,7 @@ genes = {}
 line = f.readline()
 while line:
 	spline = line.split('\t')
-	uid = spline[entry_pos].replace('-','@') # Dealing with isoforms and the fact that hyphens are overloaded
+	uid = spline[entry_pos].replace('-','@')
 	pn = spline[prot_pos]
 	gn = spline[gene_pos]
 	if gn != '\n':

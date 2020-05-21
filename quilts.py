@@ -569,24 +569,15 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
 			
 			try:
 				orig_seq = ref_prot[header_line.split('\t')[3]]
-				orig_aa = orig_seq[position-1]
-				if orig_aa == AA_old:
+				if orig_seq[position-1] == AA_old:
 					changes.append(var)
 					aa_substs.append((AA_old, position, AA_new))
-				elif (AA_old=='*') and (orig_aa in 'EOQUW') and (orig_aa != AA_new):
-					changes.append(var)
-					aa_substs.append((orig_aa, position, AA_new))
 				else:
 					write_to_log("Original AA at position %d in %s not what we expected [expected %s, found %s], skipping..." % (position, header_line.split('\t')[3], AA_old, orig_seq[position-1]), referrorfile)
 			except KeyError:
 				write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
 			except IndexError: # deal with this later
-				orig_seq = ref_prot[header_line.split('\t')[3]]
-				if (AA_old=='*') and (position==len(orig_seq)+1):
-					changes.append(var)
-					aa_substs.append((AA_old, position, AA_new))
-				else:
-					write_to_log("Protein %s not expected length, skipping..." % header_line.split('\t')[3], referrorfile)
+				write_to_log("Protein %s not expected length, skipping..." % header_line.split('\t')[3], referrorfile)
 
 		# If the new codon is a stop codon, 
 		# uh...I found this comment here and it looks like I decided not to do whatever I was planning to do.
@@ -617,14 +608,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
 					position = pos/3+1
 				try:
 					orig_seq = ref_prot[header_line.split('\t')[3]]
-					orig_aa = orig_seq[position-1]
-					if orig_aa == AA_old:
-						changes.append(change)
-						aa_substs.append((AA_old, position, AA_new))
-					elif (AA_old=='*') and (orig_aa in 'EOQUW') and (orig_aa != AA_new):
-						changes.append(change)
-						aa_substs.append((orig_aa, position, AA_new))
-					elif (AA_old=='*') and (position == len(orig_seq)+1):
+					if orig_seq[position-1] == AA_old:
 						changes.append(change)
 						aa_substs.append((AA_old, position, AA_new))
 					else:
@@ -632,12 +616,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
 				except KeyError:
 					write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
 				except IndexError: # deal with this later
-					orig_seq = ref_prot[header_line.split('\t')[3]]
-					if (AA_old=='*') and (position==len(orig_seq)+1):
-						changes.append(change)
-						aa_substs.append((AA_old, position, AA_new))
-					else:
-						write_to_log("Protein %s not expected length, skipping..." % header_line.split('\t')[3], referrorfile)
+					write_to_log("Protein %s not expected length, skipping..." % header_line.split('\t')[3], referrorfile)
 
 		prev_start = triplet_start
 		prev_subst = [subst_pos, triplet_subst]
@@ -1027,78 +1006,6 @@ def format_header(orig_header,seq_type,abbr,desc):
 	elif seq_type=='juncN':
 		return format_juncN_header(orig_header)
 	return orig_header
-
-def translate_saavs(log_dir, bed_file, logfile, ref_prot, seq_type='aa'):
-	'''SAAVs get a separate translation function so we can handle the alternate stop codons
-	(TGA->U,W; TAA->Q,E; TAG->Q,E,O) which are much more difficult to deal with in other
-	variant types and as such are relegated to future wishlist items. 
-	We do this by simply substituting the variant amino acid into the protein as it exists 
-	in the protein reference rather than translating from the genome (which would 
-	result in a premature stop codon). 
-	Why these alternate stop codons exist, I cannot say. Perhaps the human body simply wishes 
-	to play a cruel trick on me. Well, it worked! Jerks!'''
-	# Get the descriptions
-	desc = {}
-	f = open(log_dir+"proteome-descriptions.txt",'r')
-	line = f.readline()
-	while line:
-		spline = line.rstrip().split('\t')
-		if len(spline) > 1:
-			desc[spline[0]] = spline[1]
-		else:
-			desc[spline[0]] = ""
-		line = f.readline()
-	f.close()
-	# Get the gene abbreviations
-	abbr = {}
-	f = open(log_dir+"proteome-genes.txt",'r')
-	line = f.readline()
-	while line:
-		spline = line.rstrip().split()
-		abbr[spline[0]] = spline[-1]
-		line = f.readline()
-	f.close()
-	
-	# The rest of it
-	f = open(log_dir+bed_file,'r')
-	out_fasta = open(log_dir+bed_file+".fasta",'w') # The original QUILTS writes two other files but they're just duplicates of proteome.aa.var.bed and proteome.aa.var.bed.dna, it seems. For now I'm leaving them out.
-	line = f.readline()
-	prev_AA_subst = []
-	prev_gene = ''
-	while line:
-		if line[0] == ">":
-			gene = line[1:].split('-')[0]
-			AA_subst = line.rsplit('-',1)[-1].split(':')[0]
-			if prev_gene != gene:
-				prev_AA_subst = []
-			if AA_subst not in prev_AA_subst:
-				pos = int(AA_subst[1:-1])
-				subst = AA_subst[-1]
-				sequence = ref_prot[gene]
-				new_sequence = (sequence[:pos-1]+subst+sequence[pos:]).split('*')[0]
-				out_fasta.write(format_header(line, seq_type, abbr[gene], desc[gene]))
-				out_fasta.write(new_sequence+'\n')
-			prev_AA_subst.append(AA_subst)
-			prev_gene = gene
-		# Line type three: Exon line (can be pre-100, post-100 or internal)
-		else:
-			pass
-			'''
-			spline = line.rstrip().split('\t')
-			# TO GET STRAND: search for '+', if we find it it's pos else neg
-			# Basically, if the strand is reversed, we want the -1 part because that'll give us the extra stuff
-			# that gets added in if the stop codon is deleted. But if the strand is forward, we keep the +1 instead.
-			if spline[1] != '+1' and spline[1] != '-1':
-				sequence += spline[-1]
-			elif spline[1] == '-1' and spline[5] == '-':
-				sequence += spline[-1]
-			elif spline[1] == '+1' and spline[5] =='+':
-				sequence += spline[-1]
-			'''
-		line = f.readline()
-
-	f.close()
-	out_fasta.close()
 
 def translate(log_dir, bed_file, logfile, seq_type):
 	'''Reads in a bed.dna file and translates it to a protein .fasta file.'''
@@ -2380,8 +2287,7 @@ if __name__ == "__main__":
 		write_to_status("Variants sorted")	
 
 		# Translate the variant sequences into a fasta file.
-		#translate(results_folder+"/log/", "proteome.aa.var.bed.dna", logfile, 'aa')
-		translate_saavs(results_folder+"/log/", "proteome.aa.var.bed.dna", logfile, ref_prot)
+		translate(results_folder+"/log/", "proteome.aa.var.bed.dna", logfile, 'aa')
 		write_to_status("Translated SAAVs")	
 		translate(results_folder+"/log/", "proteome.indel.var.bed.dna", logfile, 'indel')
 		write_to_status("Translated indels")
