@@ -1065,10 +1065,12 @@ def translate_saavs(log_dir, bed_file, logfile, ref_prot, seq_type='aa'):
 	line = f.readline()
 	prev_AA_subst = []
 	prev_gene = ''
+	stop_replaced_flag = None
 	while line:
 		if line[0] == ">":
 			gene = line[1:].split('-')[0]
 			AA_subst = line.rsplit('-',1)[-1].split(':')[0]
+			stop_replaced_flag = None
 			if prev_gene != gene:
 				prev_AA_subst = []
 			if AA_subst not in prev_AA_subst:
@@ -1077,24 +1079,22 @@ def translate_saavs(log_dir, bed_file, logfile, ref_prot, seq_type='aa'):
 				sequence = ref_prot[gene]
 				new_sequence = (sequence[:pos-1]+subst+sequence[pos:]).split('*')[0]
 				out_fasta.write(format_header(line, seq_type, abbr[gene], desc[gene]))
-				out_fasta.write(new_sequence+'\n')
+				if AA_subst[0] == '*': # Write it out but don't change lines yet - we'll put some extra stuff on the end
+					out_fasta.write(new_sequence)
+					stop_replaced_flag = line.split()[1][-1] # pos or neg strand
+				else: # Just write it out regular-style
+					out_fasta.write(new_sequence+'\n')
 			prev_AA_subst.append(AA_subst)
 			prev_gene = gene
-		# Line type three: Exon line (can be pre-100, post-100 or internal)
-		else:
-			pass
-			'''
-			spline = line.rstrip().split('\t')
-			# TO GET STRAND: search for '+', if we find it it's pos else neg
-			# Basically, if the strand is reversed, we want the -1 part because that'll give us the extra stuff
-			# that gets added in if the stop codon is deleted. But if the strand is forward, we keep the +1 instead.
-			if spline[1] != '+1' and spline[1] != '-1':
-				sequence += spline[-1]
-			elif spline[1] == '-1' and spline[5] == '-':
-				sequence += spline[-1]
-			elif spline[1] == '+1' and spline[5] =='+':
-				sequence += spline[-1]
-			'''
+		# To add extra after a replaced stop codon, if the strand is reversed, we want the -1 part because that'll give us the extra stuff
+		# that gets added in if the stop codon is deleted. But if the strand is forward, we keep the +1 instead.
+		elif (line.split('\t')[1] == '-1') and stop_replaced_flag == '-':
+			extra_seq = line.rstrip().split()[-1]
+			out_fasta.write(translate_seq(extra_seq, '-')+'\n')
+		elif line.split('\t')[1] == '+1' and stop_replaced_flag == '+':
+			extra_seq = line.rstrip().split()[-1]
+			out_fasta.write(translate_seq(extra_seq, '+')+'\n')
+			
 		line = f.readline()
 
 	f.close()
