@@ -65,9 +65,9 @@ def parse_input_arguments():
 	parser.add_argument('--junction', type=str)
 	parser.add_argument('--junction_file_type', choices=['mapsplice','tophat','star'], default='mapsplice', help="which program was used to generate your junction files (options are mapsplice, star, tophat). Defaults to mapsplice")
 	parser.add_argument('--fusion', type=str, help="full path to folder containing fusion file")
-	parser.add_argument('--threshA', type=int, default=2)
-	parser.add_argument('--threshAN', type=int, default=3)
-	parser.add_argument('--threshN', type=int, default=3)
+	parser.add_argument('--threshB', type=int, default=2, help="read support threshold for junctions with both exon boundaries annotated")
+	parser.add_argument('--threshD', type=int, default=3, help="read support threshold for junctions with only donor exon boundary annotated")
+	parser.add_argument('--threshN', type=int, default=3, help="read support threshold for junctions without donor exon boundary annotated")
 	parser.add_argument('--variant_quality_threshold', type=float, default=0.0, help="Quality threshold for variants")
 	parser.add_argument('--no_missed_cleavage', action='store_true', default=False, help="Tryptic peptide fasta by default allows for a single missed cleavage; adding this argument will tell the virtual trypsinizer to assume perfect cleavage")
 	
@@ -482,6 +482,15 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
 	global logfile
 	global referrorfile
 	
+	changes = []
+	aa_substs = []
+	indels = []
+	indel_substs = []
+
+	if header_line.split('\t')[3] not in ref_prot.keys():
+		write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
+		return changes, aa_substs, indels
+
 	# Ready the translation table for the reverse strand.
 	translate_table = maketrans("ACGTacgt","TGCAtgca")
 	
@@ -489,16 +498,11 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
 	# Do I check only a single reading frame? That's what they did. 
 	# Also: if the length of old != length of new, it's an indel, so ignore for now.	
 	full_seq = ''.join(exon_seqs[1:-1])
-	
+
 	# Set a flag for a reverse gene
 	reverse_flag = False
 	if header_line.split('\t')[5] == '-':
 		reverse_flag = True
-	
-	changes = []
-	aa_substs = []
-	indels = []
-	indel_substs = []
 
 	# With hg38, we get a weird thing where some of the genes in proteome.bed.dna have no sequence associated with them.
 	# So...I guess I'll just skip those for now until I figure out why
@@ -578,9 +582,9 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
 					aa_substs.append((orig_aa, position, AA_new))
 				else:
 					write_to_log("Original AA at position %d in %s not what we expected [expected %s, found %s], skipping..." % (position, header_line.split('\t')[3], AA_old, orig_seq[position-1]), referrorfile)
-			except KeyError:
-				write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
-			except IndexError: # deal with this later
+			#except KeyError:
+			#	write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
+			except IndexError:
 				orig_seq = ref_prot[header_line.split('\t')[3]]
 				if (AA_old=='*') and (position==len(orig_seq)+1):
 					changes.append(var)
@@ -629,8 +633,8 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
 						aa_substs.append((AA_old, position, AA_new))
 					else:
 						write_to_log("Original AA at position %d in %s not what we expected [expected %s, found %s], skipping..." % (position, header_line.split('\t')[3], AA_old, orig_seq[position-1]), referrorfile)
-				except KeyError:
-					write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
+				#except KeyError:
+				#	write_to_log("Protein %s not found in reference, skipping..." % header_line.split('\t')[3], referrorfile)
 				except IndexError: # deal with this later
 					orig_seq = ref_prot[header_line.split('\t')[3]]
 					if (AA_old=='*') and (position==len(orig_seq)+1):
@@ -879,19 +883,20 @@ def tabulate_ref_mismatches():
 
 	missing_prots = set([])
 	mismatch_prots = set([])
+	junc_missing_prots = set([])
 	rerf = open(referrorfile,'r')
 	for line in rerf.readlines():
 		if line.split()[0] == 'Protein':
 			missing_prots.add(line.split()[1])
 		elif line.split()[0] == "Original":
 			mismatch_prots.add(line.split()[6])
+		elif line.split()[0] == "Junction":
+			junc_missing_prots.add(line.split()[2])
 	rerf.close()
 	
-	mismatches = str(len(mismatch_prots))
-	missings = str(len(missing_prots))
-
-	write_to_log("%d proteins not found in reference" % (len(missing_prots)),logfile)
-	write_to_log("%d proteins do not match between the transcriptome and the proteome reference" % (len(mismatch_prots)),logfile)
+	write_to_log("%d SAAV proteins not found in reference" % (len(missing_prots)),logfile)
+	write_to_log("%d junction proteins not found in reference" % (len(junc_missing_prots)),logfile)
+	write_to_log("%d SAAV proteins do not match between the transcriptome and the proteome reference" % (len(mismatch_prots)),logfile)
 
 ### These functions are used to translate DNA variants into variant proteins.
 
@@ -1706,8 +1711,9 @@ def filter_known_transcripts(transcriptome_bed, results_folder, logfile):
 	write_to_log("Alternative splice junctions with known endpoints: %d" % alt_match, logfile)
 	write_to_log("Alternative splice junctions with known donor site: %d" % donor_match, logfile)
 
-def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
-	
+def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile, ref_prot):
+	global referrorfile
+
 	# Get translations from transcript ID to protein ID
 	transmap = {}
 	f = open(log_dir+'/proteome-genes.txt','r')
@@ -1739,12 +1745,15 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 			junc_ids = spline[3].split('-')[1:]
 			for id in junc_ids:
 				if id in transmap.keys() and transmap[id] in prot_lines.keys():
-					to_write = write_known_endpoints(line, prot_lines[transmap[id]])
-					if to_write: # everything works as planned
-						w.write(to_write+'\n')
-					else: # one end of the junction is in an untranslated region
-						spline[3] = spline[3].split('-')[0]+'-'+id
-						untranslated.write('\t'.join(spline)+'\n')
+					if transmap[id] not in ref_prot.keys():
+						write_to_log("Junction protein %s not found in reference, skipping..." % transmap[id], referrorfile)
+					else:
+						to_write = write_known_endpoints(line, prot_lines[transmap[id]])
+						if to_write: # everything works as planned
+							w.write(to_write+'\n')
+						else: # one end of the junction is in an untranslated region
+							spline[3] = spline[3].split('-')[0]+'-'+id
+							untranslated.write('\t'.join(spline)+'\n')
 				else: # this transcript is untranslated mRNA
 					spline[3] = spline[3].split('-')[0]+'-'+id
 					untranslated.write('\t'.join(spline)+'\n')
@@ -1764,12 +1773,15 @@ def filter_alternative_splices(log_dir, threshA, threshAN, threshN, logfile):
 			junc_ids = spline[3].split('-')[1:]
 			for id in junc_ids:
 				if id in transmap.keys() and transmap[id] in prot_lines.keys():
-					to_write = write_donor_endpoint(line, prot_lines[transmap[id]])
-					if to_write: # everything works as planned
-						w.write(to_write+'\n')
-					else: # the donor end of the junction is in an untranslated region
-						spline[3] = spline[3].split('-')[0]+'-'+id
-						untranslated.write('\t'.join(spline)+'\n')
+					if transmap[id] not in ref_prot.keys():
+						write_to_log("Junction protein %s not found in reference, skipping..." % transmap[id], referrorfile)
+					else:
+						to_write = write_donor_endpoint(line, prot_lines[transmap[id]])
+						if to_write: # everything works as planned
+							w.write(to_write+'\n')
+						else: # the donor end of the junction is in an untranslated region
+							spline[3] = spline[3].split('-')[0]+'-'+id
+							untranslated.write('\t'.join(spline)+'\n')
 				else: # this transcript is untranslated mRNA
 					spline[3] = spline[3].split('-')[0]+'-'+id
 					untranslated.write('\t'.join(spline)+'\n')
@@ -2247,12 +2259,14 @@ def translate_fusions(result_dir):
 					fus_id = line.split()[0].split('|')[0]
 					fus_info = line.split()[0].split('|',1)[-1]
 					for i in range(0,3):
-						#w.write('>%s|%d+\n' % (line.split()[0],i))
-						w.write('>%s-%d+|%s|%d+\n' % (fus_id, i, fus_info,i))
-						w.write('%s\n' % translate_seq(seq[i:], '+', True))
-						#w.write('>%s|%d-\n' % (line.split()[0],i))
-						w.write('>%s-%d-|%s|%d-\n' % (fus_id, i, fus_info,i))
-						w.write('%s\n' % translate_seq(seq[:len(seq)-i], '-', True))
+						translate_pos = translate_seq(seq[i:], '+', True)
+						if '*' not in translate_pos:
+							w.write('>%s-%d+|%s|%d+\n' % (fus_id, i, fus_info,i))
+							w.write('%s\n' % translate_pos)
+						translate_neg = translate_seq(seq[:len(seq)-i], '-', True)
+						if '*' not in translate_neg:
+							w.write('>%s-%d-|%s|%d-\n' % (fus_id, i, fus_info,i))
+							w.write('%s\n' % translate_neg)
 				second = False
 				failstate = False
 				seq = ""
@@ -2315,7 +2329,14 @@ if __name__ == "__main__":
 	write_to_log("Reference DB used: "+args.proteome.split("/")[-1], logfile)
 	
 	# Set up codon map
-	codon_map = {"TTT":"F","TTC":"F","TTA":"L","TTG":"L","CTT":"L","CTC":"L","CTA":"L","CTG":"L","ATT":"I","ATC":"I","ATA":"I","ATG":"M","GTT":"V","GTC":"V","GTA":"V","GTG":"V","TCT":"S","TCC":"S","TCA":"S","TCG":"S","CCT":"P","CCC":"P","CCA":"P","CCG":"P","ACT":"T","ACC":"T","ACA":"T","ACG":"T","GCT":"A","GCC":"A","GCA":"A","GCG":"A","TAT":"Y","TAC":"Y","TAA":"*","TAG":"*","CAT":"H","CAC":"H","CAA":"Q","CAG":"Q","AAT":"N","AAC":"N","AAA":"K","AAG":"K","GAT":"D","GAC":"D","GAA":"E","GAG":"E","TGT":"C","TGC":"C","TGA":"*","TGG":"W","CGT":"R","CGC":"R","CGA":"R","CGG":"R","AGT":"S","AGC":"S","AGA":"R","AGG":"R","GGT":"G","GGC":"G","GGA":"G","GGG":"G"}
+	codon_map = {"TTT":"F","TTC":"F","TTA":"L","TTG":"L","CTT":"L","CTC":"L","CTA":"L","CTG":"L",
+	"ATT":"I","ATC":"I","ATA":"I","ATG":"M","GTT":"V","GTC":"V","GTA":"V","GTG":"V","TCT":"S",
+	"TCC":"S","TCA":"S","TCG":"S","CCT":"P","CCC":"P","CCA":"P","CCG":"P","ACT":"T","ACC":"T",
+	"ACA":"T","ACG":"T","GCT":"A","GCC":"A","GCA":"A","GCG":"A","TAT":"Y","TAC":"Y","TAA":"*",
+	"TAG":"*","CAT":"H","CAC":"H","CAA":"Q","CAG":"Q","AAT":"N","AAC":"N","AAA":"K","AAG":"K",
+	"GAT":"D","GAC":"D","GAA":"E","GAG":"E","TGT":"C","TGC":"C","TGA":"*","TGG":"W","CGT":"R",
+	"CGC":"R","CGA":"R","CGG":"R","AGT":"S","AGC":"S","AGA":"R","AGG":"R","GGT":"G","GGC":"G",
+	"GGA":"G","GGG":"G"}
 	
 	# Time to merge and quality-threshold the variant files!
 	if args.somatic:
@@ -2376,7 +2397,6 @@ if __name__ == "__main__":
 		# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
 		# I will continue to do this, probably? I'll just ignore more later on
 		sort_variants(results_folder+"/log/proteome.bed.dna", results_folder+"/log/proteome.bed.var", "proteome", ref_prot)
-		tabulate_ref_mismatches()
 		write_to_status("Variants sorted")	
 
 		# Translate the variant sequences into a fasta file.
@@ -2419,7 +2439,7 @@ if __name__ == "__main__":
 			quit_if_no_variant_files(args) # Check to make sure we still have at least one variant file
 		else:
 			filter_known_transcripts(args.proteome+'/transcriptome.bed', results_folder+'/log', logfile)
-			filter_alternative_splices(results_folder+'/log/', args.threshA, args.threshAN, args.threshN, logfile)
+			filter_alternative_splices(results_folder+'/log/', args.threshB, args.threshD, args.threshN, logfile, ref_prot)
 			write_to_status("Filtered alternative splices into the appropriate types.")
 		
 			# Make a fasta out of the alternative splices with conserved exon boundaries
@@ -2467,6 +2487,9 @@ if __name__ == "__main__":
 			shutil.copy(results_folder+"/log/novel.bed.dna.fasta", results_folder+"/fasta/parts/proteome.novel_splices.fasta")
 			write_to_status("Translated alternative-splice junctions")
 	
+	if args.germline or args.somatic or args.junction:
+		tabulate_ref_mismatches()
+
 	if args.fusion:
 		write_to_status("Starting on fusions now.")
 		fusion_flag = merge_and_filter_fusion_files(args.fusion, results_folder)

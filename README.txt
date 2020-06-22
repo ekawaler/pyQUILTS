@@ -12,9 +12,9 @@ python quilts.py
 	—-fusion (path to a folder containing .txt files of fusion genes, format specified below)
 	—-junction (path to a folder containing junction files, .bed if tophat, .txt if MapSplice, or .tab if STAR)
 	—-junction_file_type (can be either ‘mapsplice’ (default), ‘tophat’, or ‘star’)
-	—-threshA (integer - minimum number of reads to support a splice junction with conserved exon boundaries)
-	—-threshAN (integer - minimum number of reads to support a splice junction with one conserved exon boundary)
-	—-threshN (integer - minimum number of reads to support a completely novel splice junction)
+	—-threshB (integer - minimum number of reads to support a splice junction with conserved exon boundaries)
+	—-threshD (integer - minimum number of reads to support a splice junction with only the donor exon boundary conserved)
+	—-threshN (integer - minimum number of reads to support a splice junction without the donor exon boundary conserved)
 	—-variant-quality-threshold (quality threshold for variants)
 	—-no-missed-cleavage (defaults to allow for one missed cleavage; used for generating tryptic peptides which is not yet ready)
 
