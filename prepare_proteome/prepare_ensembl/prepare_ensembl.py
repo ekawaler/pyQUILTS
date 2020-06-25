@@ -4,6 +4,7 @@
 # proteome.bed: chr1	924431	939291	ENSP00000411579	1000	+	924431	939291	0	7	517,92,182,51,125,90,17	0,1490,5723,6607,11340,14608,14843
 
 import sys
+import os
 
 class Gene:
 	def __init__(self, chromosome, gene_id, protein_id, transcript_id, gene_name, gene_desc, strand):
@@ -18,18 +19,28 @@ class Gene:
 		self.prot_exons = {}
 	
 	def add_exon(self, exon_no, prot_start, prot_end, trans_start, trans_end):
-		self.trans_exons[int(exon_no)] = [int(trans_start), int(trans_end)]
+		self.trans_exons[int(exon_no)] = [int(trans_start)-1, int(trans_end)]
 		if prot_start != '' and prot_end != '':
-			self.prot_exons[int(exon_no)] = [int(prot_start), int(prot_end)]
-	
+			self.prot_exons[int(exon_no)] = [int(prot_start)-1, int(prot_end)]
+
 	def print_bed_line(self):
 		exon_nos = self.prot_exons.keys()
 		exon_nos.sort()
+		total_length = 0
+		# End phase dealings - there can be an end phase on the final codon, which throws off 
+		# calculations, especially on negative strands. Cutting off the end phase if the length
+		# of the NT sequence is not divisible by 3
+		for i in exon_nos:
+			if i in self.prot_exons.keys():
+				total_length += self.prot_exons[i][1]-self.prot_exons[i][0]
+		endphase_modifier = total_length%3
 		if self.strand == '+':
+			self.prot_exons[max(exon_nos)][1] -= endphase_modifier
 			start = self.prot_exons[min(exon_nos)][0]
 			end = self.prot_exons[max(exon_nos)][1]
 		else:
 			exon_nos.reverse()
+			self.prot_exons[max(exon_nos)][0] += endphase_modifier
 			end = self.prot_exons[min(exon_nos)][1]
 			start = self.prot_exons[max(exon_nos)][0]
 		lengths = []
@@ -37,15 +48,13 @@ class Gene:
 		for i in exon_nos:
 			if i in self.prot_exons.keys():
 				ex_start, ex_end = self.prot_exons[i][0], self.prot_exons[i][1]
-				lengths.append(str(ex_end-ex_start+1))
+				lengths.append(str(ex_end-ex_start))
 				starts.append(str(ex_start-start))
 		print_str = "%s\t%d\t%d\t%s\t1000\t%s\t%d\t%d\t0\t%d\t%s\t%s\n" % (self.chromosome, start, end, self.protein_id, self.strand, start, end, len(self.prot_exons), ','.join(lengths), ','.join(starts))
 		# Negative strand!?
 		return print_str
 	
 	def print_trans_line(self):
-		if self.transcript_id == 'ENST00000610577':
-			print self.trans_exons
 		exon_nos = self.trans_exons.keys()
 		exon_nos.sort()
 		if self.strand == '+':
@@ -60,12 +69,37 @@ class Gene:
 		for i in exon_nos:
 			if i in self.trans_exons.keys():
 				ex_start, ex_end = self.trans_exons[i][0], self.trans_exons[i][1]
-				lengths.append(str(ex_end-ex_start+1))
+				lengths.append(str(ex_end-ex_start))
 				starts.append(str(ex_start-start))
 		print_str = "%s\t%d\t%d\t%s\t1000\t%s\t%d\t%d\t0\t%d\t%s\t%s\n" % (self.chromosome, start, end, self.transcript_id, self.strand, start, end, len(self.trans_exons), ','.join(lengths), ','.join(starts))
 		# Negative strand!?
 		return print_str
-			
+
+# Clean up the proteome FASTA - remove everything that starts with an X or contains a stop codon
+f = open(sys.argv[2],'r')
+w = open('cleaned_proteome.fasta','w')
+header = ''
+seq = ''
+line = f.readline()
+while line:
+    if line[0] == '>':
+        if seq != '' and seq[0] != 'X' and '*' not in seq:
+            w.write(header)
+            w.write(seq+'\n')
+        header = line
+        seq = ''
+    else:
+        seq += line.rstrip()
+    line = f.readline()
+if seq[0] != 'X' and '*' not in seq: # last one
+    w.write(header)
+    w.write(seq+'\n')
+f.close()
+w.close()
+os.system('mv %s orig_proteome.fasta' % sys.argv[2])
+os.system('mv cleaned_proteome.fasta proteome.fasta')
+
+# Finding where each column lives in the input file
 f = open(sys.argv[1], 'r')
 header = f.readline().rstrip().split('\t')
 chrm_pos = header.index("Chromosome/scaffold name")
@@ -80,9 +114,9 @@ exon_start_pos = header.index("Exon region start (bp)")
 exon_end_pos = header.index("Exon region end (bp)")
 cds_start_pos = header.index("Genomic coding start")
 cds_end_pos = header.index("Genomic coding end")
-print header
 genes = {}
 
+# Parsing the input file
 line = f.readline()
 while line:
 	spline = line.rstrip('\n').split('\t')
@@ -93,9 +127,6 @@ while line:
 	genes[gene_name].add_exon(spline[exon_no_pos], spline[cds_start_pos], spline[cds_end_pos], spline[exon_start_pos], spline[exon_end_pos])
 	line = f.readline()	
 f.close()
-
-for i in genes.keys()[:5]:
-	print i,genes[i].prot_exons,genes[i].trans_exons
 
 wgenes = open('proteome-genes.txt','w')
 wdesc = open('proteome-descriptions.txt','w')
