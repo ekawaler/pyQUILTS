@@ -1,7 +1,7 @@
 
 1. Get your info files from Biomart.
 
-	Go to: http://useast.ensembl.org/biomart/martview/ (for Hg37, go to http://feb2014.archive.ensembl.org/biomart/martview/)
+	Go to: http://useast.ensembl.org/biomart/martview/ (for GRCh37, go to http://feb2014.archive.ensembl.org/biomart/martview/)
 
 	Choose the correct database and organism from the dropdown menus.
 
@@ -14,13 +14,13 @@
 
 2. Get your reference proteome FASTA file.
 
-	Go to: http://useast.ensembl.org/info/data/ftp/index.html/
+	Go to: http://useast.ensembl.org/info/data/ftp/index.html/ 
 
 	In the “Single species data” table, find your species and click the FASTA link in the column “Protein sequence (FASTA)”
 
 	Download and unzip the file with the extension .pep.all.fa.gz
 
-	At least for the human and mouse proteomes, this only works with release 84 onward. (They added some new data to the FASTA header that we use.)
+	At least for the human and mouse proteomes, this only works with release 84 onward. (They added some new data to the FASTA header that we use.) If you need GRCh37 human data, you can download the relevant release at ftp://ftp.ensembl.org/pub/release-75/fasta/homo_sapiens/pep/ , but it may not parse correctly.
 
 3. Run the prepare_ensembl.py script:
 
