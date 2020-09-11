@@ -2338,6 +2338,9 @@ if __name__ == "__main__":
 	"CGC":"R","CGA":"R","CGG":"R","AGT":"S","AGC":"S","AGA":"R","AGG":"R","GGT":"G","GGC":"G",
 	"GGA":"G","GGG":"G"}
 	
+	# Prep a map of the reference proteome for quality checks
+	ref_prot = save_ref_prot(results_folder+"/fasta/reference_proteome.fasta")
+
 	# Time to merge and quality-threshold the variant files!
 	if args.somatic:
 		som_flag = merge_and_qual_filter(args.somatic, args.variant_quality_threshold)
@@ -2390,9 +2393,6 @@ if __name__ == "__main__":
 
 	# Finish out the variants, if there are any	
 	if args.somatic or args.germline:
-		# Prep a map of the reference proteome for quality checks
-		ref_prot = save_ref_prot(results_folder+"/fasta/reference_proteome.fasta")
-
 		# Combine (some more) and sort variants.
 		# Also variants are sorted by what they do to the sequence (add/remove stop, change AA, etc)
 		# I will continue to do this, probably? I'll just ignore more later on
