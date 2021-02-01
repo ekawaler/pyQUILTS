@@ -306,6 +306,7 @@ def merge_and_qual_filter(vcf_dir, quality_threshold):
 
 ### This function saves the proteome as a map for quality checks.
 def save_ref_prot(ref_prot_loc):
+	'''This function saves the proteome as a map for quality checks.'''
 	ref_prot = {}
 	f = open(ref_prot_loc,'r')
 	header = f.readline()
@@ -377,6 +378,7 @@ def remove_somatic_duplicates(germ_dir, som_dir):
 ### This function is used to create .bed files of only variants that exist in exons.
 
 def get_variants(vcf_file, proteome_file, type):
+	'''This function is used to create .bed files of only variants that exist in exons.'''
 	f = open(proteome_file, 'r')
 	
 	# Basically goes through proteome.bed and finds all positions in exons
@@ -432,9 +434,9 @@ def get_variants(vcf_file, proteome_file, type):
 			warnings.warn("Failed to parse %s" % line)
 			line = f.readline()
 			continue
-		if old == '.' or old == '-':
+		if old == '.' or old == '-' or old == 'N':
 			old = ''
-		if new == '.' or new == '-':
+		if new == '.' or new == '-' or new == 'N':
 			new = ''
 		exon = est.find_exon(chr,pos)
 		if exon != []:
@@ -467,9 +469,9 @@ def get_variants(vcf_file, proteome_file, type):
 		w.write("%s\t%s\t%s\n" % (key, ','.join(in_chr), ','.join(in_gene)))
 	w.close()
 
-def valid_nucleotides(strg, search=re.compile(r'[^ACGTU\.\-.]').search):
+def valid_nucleotides(strg, search=re.compile(r'[^ACGTUN\.\-.]').search):
 	'''Thanks, Stack Overflow user! Use this to make sure the variant we're given contains
-	only nucleotide letters - found a MAF file that sometimes put "TRUE" in there because
+	only nucleotide letters and Ns - found a MAF file that sometimes put "TRUE" in there because
 	people are jerks and you can only trust yourself'''
 	return not bool(search(strg))
 
@@ -774,7 +776,7 @@ def write_out_indel_bed_dna(header_line, second_header, exon_headers, indels, ou
 		out_indel_bed_dna.write('\t'.join(exon_headers[-1])) # Post-sequence	
 
 def sort_variants(proteome_file, variant_file, output_prefix, ref_prot):
-	'''Goes through the variants and sorts them by type, writing out a bunch of intermediate files in the process. Right now the types are "single-AA non-stop variant" and "not that", but eventually will have more.'''
+	'''Goes through the variants and sorts them by type, writing out a bunch of intermediate files in the process.'''
 	global codon_map
 	
 	# Grab all the variants and their locations within their genes
@@ -2366,7 +2368,7 @@ if __name__ == "__main__":
 	try:
 		check_call("%s/read_chr_bed %s/log/proteome.bed %s" % (script_dir, results_folder, args.genome), shell=True)
 	except CalledProcessError:
-		raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file.\nAborting program.")
+		raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file. Try recompiling read_chr_bed.c.\nAborting program.")
 	# Commented the above out for speed - it's slow, so for current testing purposes I'm just copying it from elsewhere
 	#shutil.copy('/ifs/data/proteomics/tcga/scripts/quilts/pyquilts/proteome.bed.dna', results_folder+"/log/")
 	
@@ -2449,7 +2451,7 @@ if __name__ == "__main__":
 				# Don't know why this copies instead of moving. If I never use merged-junctions.filter.A.bed.dna again, just move it or have read_chr_bed output the alternative.bed.dna file instead.
 				shutil.copy(results_folder+'/log/merged-junctions.alt.filtered.bed.dna', results_folder+'/log/alternative.bed.dna')
 			except CalledProcessError:
-				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.alt.filtered.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
+				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.alt.filtered.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries. Try recompiling read_chr_bed.c.")
 			write_to_status("Done with read_chr_bed to create alternative.bed.dna")
 			
 			# Make a fasta out of the alternative splices with conserved donor boundaries
@@ -2459,7 +2461,7 @@ if __name__ == "__main__":
 				# Don't know why this copies instead of moving.
 				shutil.copy(results_folder+'/log/merged-junctions.donor.filtered.bed.dna', results_folder+'/log/donor.bed.dna')
 			except CalledProcessError:
-				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.donor.filtered.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries.")
+				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.donor.filtered.bed.dna file. Will not have a fasta file of alternative splices with conserved exon boundaries. Try recompiling read_chr_bed.c.")
 			write_to_status("Done with read_chr_bed to create donor.bed.dna")
 			
 			# Now to tackle the novels...
@@ -2468,7 +2470,7 @@ if __name__ == "__main__":
 				check_call("%s/read_chr_bed %s/log/merged-junctions.novel.filtered.bed %s" % (script_dir, results_folder, args.genome), shell=True)
 				shutil.copy(results_folder+'/log/merged-junctions.novel.filtered.bed.dna', results_folder+'/log/novel.bed.dna')
 			except CalledProcessError:
-				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.novel.filtered.bed.dna file. Will not have a fasta file of novel spliceforms.")
+				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a merged-junctions.novel.filtered.bed.dna file. Will not have a fasta file of novel spliceforms. Try recompiling read_chr_bed.c.")
 			write_to_status("Done with read_chr_bed to create novel.bed.dna")
 		
 			# Translating the junctions. Looks like it requires a slightly different function than the old translation function.
@@ -2503,7 +2505,7 @@ if __name__ == "__main__":
 			try:
 				check_call("%s/read_chr_bed %s/log/fusions.bed %s" % (script_dir, results_folder, args.genome), shell=True)
 			except CalledProcessError:
-				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a fusions.bed.dna file. Will not be able to perform fusions.")
+				warnings.warn("WARNING: read_chr_bed didn't work - now we don't have a fusions.bed.dna file. Will not be able to perform fusions. Try recompiling read_chr_bed.c.")
 			write_to_status("Done with read_chr_bed to fusions.bed.dna")
 			translate_fusions(results_folder)
 			shutil.copy(results_folder+"/log/fusions.fasta", results_folder+"/fasta/parts/proteome.fusions.fasta")
