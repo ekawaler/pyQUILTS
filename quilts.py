@@ -57,18 +57,18 @@ def parse_input_arguments():
 	# full paths are a pain but they're more flexible.
 	# Also, at some point, make some of these arguments not optional.
 	parser = argparse.ArgumentParser(description="QUILTS") # What even is this description for, anyway? Maybe I'll remove it eventually
-	parser.add_argument('--output_dir', type=str, default=".", help="full path to output folder")
-	parser.add_argument('--proteome', type=str, default=".", help="full path to folder containing reference proteome")
-	parser.add_argument('--genome', type=str, default=".", help="full path to folder containing reference genome")
-	parser.add_argument('--germline',type=str)
-	parser.add_argument('--somatic',type=str)
-	parser.add_argument('--junction', type=str)
-	parser.add_argument('--junction_file_type', choices=['mapsplice','tophat','star'], default='mapsplice', help="which program was used to generate your junction files (options are mapsplice, star, tophat). Defaults to mapsplice")
+	parser.add_argument('--output_dir', type=str, default=".", help="full path to output folder (defaults to .)")
+	parser.add_argument('--proteome', type=str, required=True, help="full path to folder containing reference proteome (required)")
+	parser.add_argument('--genome', type=str, required=True, help="full path to folder containing reference genome (required)")
+	parser.add_argument('--germline',type=str, help="full path to folder containing germline variant VCF file(s)")
+	parser.add_argument('--somatic',type=str, help="full path to folder containing somatic variant VCF file(s)")
+	parser.add_argument('--junction', type=str, help="full path to folder containing junction file(s)")
+	parser.add_argument('--junction_file_type', choices=['mapsplice','tophat','star'], default='mapsplice', help="which program was used to generate your junction files (options are mapsplice, star, tophat) (defaults to mapsplice)")
 	parser.add_argument('--fusion', type=str, help="full path to folder containing fusion file")
-	parser.add_argument('--threshB', type=int, default=2, help="read support threshold for junctions with both exon boundaries annotated")
-	parser.add_argument('--threshD', type=int, default=3, help="read support threshold for junctions with only donor exon boundary annotated")
-	parser.add_argument('--threshN', type=int, default=3, help="read support threshold for junctions without donor exon boundary annotated")
-	parser.add_argument('--variant_quality_threshold', type=float, default=0.0, help="Quality threshold for variants")
+	parser.add_argument('--threshB', type=int, default=2, help="read support threshold for junctions with both exon boundaries annotated (default=2)")
+	parser.add_argument('--threshD', type=int, default=3, help="read support threshold for junctions with only donor exon boundary annotated (default=3)")
+	parser.add_argument('--threshN', type=int, default=3, help="read support threshold for junctions without donor exon boundary annotated (default=3)")
+	parser.add_argument('--variant_quality_threshold', type=float, default=0.0, help="Quality threshold for variants (default=0.0)")
 	parser.add_argument('--no_missed_cleavage', action='store_true', default=False, help="Tryptic peptide fasta by default allows for a single missed cleavage; adding this argument will tell the virtual trypsinizer to assume perfect cleavage")
 	
 	# Pull out the arguments
@@ -422,6 +422,9 @@ def get_variants(vcf_file, proteome_file, type):
 	line = f.readline() # Still assuming no headers
 	all_genes = {}
 	while line:
+		if line[0] == '#':
+			line = f.readline()
+			continue
 		spline = line.rstrip().split('\t')
 		try:
 			chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1]), spline[2], spline[3], spline[4], spline[5]
@@ -434,9 +437,9 @@ def get_variants(vcf_file, proteome_file, type):
 			warnings.warn("Failed to parse %s" % line)
 			line = f.readline()
 			continue
-		if old == '.' or old == '-' or old == 'N':
+		if old == '.' or old == '-':
 			old = ''
-		if new == '.' or new == '-' or new == 'N':
+		if new == '.' or new == '-':
 			new = ''
 		exon = est.find_exon(chr,pos)
 		if exon != []:
@@ -469,10 +472,11 @@ def get_variants(vcf_file, proteome_file, type):
 		w.write("%s\t%s\t%s\n" % (key, ','.join(in_chr), ','.join(in_gene)))
 	w.close()
 
-def valid_nucleotides(strg, search=re.compile(r'[^ACGTUN\.\-.]').search):
+def valid_nucleotides(strg, search=re.compile(r'[^ACGTU\.\-.]').search):
 	'''Thanks, Stack Overflow user! Use this to make sure the variant we're given contains
-	only nucleotide letters and Ns - found a MAF file that sometimes put "TRUE" in there because
-	people are jerks and you can only trust yourself'''
+	only nucleotide letters - found a MAF file that sometimes put "TRUE" in there because
+	people are jerks and you can only trust yourself. Also, at some point I might add
+	support for the other IUPAC base notations (like N), but currently just throws those out.'''
 	return not bool(search(strg))
 
 ### These functions are used to sort variants by type.
@@ -2104,17 +2108,21 @@ def translate_novels(log_dir, bed_file, logfile):
 		second_header = f.readline() # header 2
 		restart_pointer = f.tell() # if it turns out those headers didn't find a sequence in the bed file, we can restart from here in the next line
 		line = f.readline() # buffer
-		upstream = f.readline() # upstream sequence
-		downstream = f.readline() # downstream sequence
-		line = f.readline() # buffer
-		
-		if not upstream: # we're done and are going to error out if we don't break now
+		upseq = f.readline() # upstream sequence
+
+		if not upseq: # we're done and are going to error out if we don't break now
 			break
+
+		upstream = (line.rstrip().split()[-1]+upseq.rstrip().split()[-1])[-50:]
+		downseq = f.readline() # downstream sequence
+		line = f.readline() # buffer
+		downstream = (downseq.rstrip().split()[-1]+line.rstrip().split()[-1])[:50]
 		
-		if upstream[0] == '>': # this sequence wasn't found, go backwards. might break for the last entry...
+		
+		if upseq[0] == '>': # this sequence wasn't found, go backwards. might break for the last entry...
 			f.seek(restart_pointer)		
 		else: # we're good to go
-			seq = upstream.rstrip().split()[-1] + downstream.rstrip().split()[-1]
+			seq = upstream + downstream
 			seq = seq.upper()
 			for i in range(3):
 				# Positive strand
@@ -2391,7 +2399,7 @@ if __name__ == "__main__":
 		shutil.copy(results_folder+"/log/proteome.bed.S.var", results_folder+"/log/proteome.bed.var")
 	elif args.germline:
 		shutil.copy(results_folder+"/log/proteome.bed.G.var", results_folder+"/log/proteome.bed.var")
-	write_to_status("Somatic and germline combined, proteome.bed.SG or whatever output")
+	write_to_status("Somatic and germline combined")
 
 	# Finish out the variants, if there are any	
 	if args.somatic or args.germline:

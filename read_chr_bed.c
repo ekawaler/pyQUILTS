@@ -3,8 +3,8 @@
 
 int main ( int argc, char *argv[] )
 {
-	char filename[256];
-	char filename_out[256];
+	char filename[512];
+	char filename_out[512];
     char chr[256];
     char chr_dir[2000];
     char name[2000];
