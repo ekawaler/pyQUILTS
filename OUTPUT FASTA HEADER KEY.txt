@@ -15,9 +15,9 @@ ALTERNATIVE SPLICE JUNCTION: ONLY DONOR SITE CONSERVED
 Identifier (Accession Number-Junction Type-Chromosome-Donor Site - Acceptor Site) | Gene Description | Gene Name | Chromosome | Strand | Junction Type (donorConserved) | Donor Exon Number | Donor Site Coordinate | Acceptor Site Coordinate | Number of Supporting Reads
 
 ALTERNATIVE SPLICE JUNCTION: NOVEL
->NovelJunc-chr1-18379-18913|chr=1|type=novel|site1=18379|site2=18913|reads=5|frame=0+
-Identifier (Junction Type-Chromosome-Site 1-Site 1) | Chromosome | Junction Type (novel) | Boundary Site 1 Coordinate | Boundary Site 2 Coordinate | Number of Supporting Reads | Reading Frame (one of 0+,0-,1+,1-,2+,2-; we translate novel junctions in all six reading frames)
+>NovelJunc-chr1-18379-18913-0+|chr=1|type=novel|site1=18379|site2=18913|reads=5|frame=0+
+Identifier (Junction Type-Chromosome-Site 1-Site 2-Reading Frame) | Chromosome | Junction Type (novel) | Boundary Site 1 Coordinate | Boundary Site 2 Coordinate | Number of Supporting Reads | Reading Frame (one of 0+,0-,1+,1-,2+,2-; we translate novel junctions in all six reading frames)
 
 GENE FUSION
->DNAJC10--ARHGEF12|leftBreak=chr2:182728994:+|rightBreak=chr11:120431771:+|junctionReadCount=1|0+
-Identifier (Fusion Gene 1--Fusion Gene 2) | Left Break Site (chromosome:coordinate:strand) | Right Break Site (chromosome:coordinate:strand) | Junction Read Count | Reading Frame (one of 0+,0-,1+,1-,2+,2-; we translate novel junctions in all six reading frames)
+>DNAJC10--ARHGEF12-0+|leftBreak=chr2:182728994:+|rightBreak=chr11:120431771:+|junctionReadCount=1|0+
+Identifier (Fusion Gene 1--Fusion Gene 2-Reading Frame) | Left Break Site (chromosome:coordinate:strand) | Right Break Site (chromosome:coordinate:strand) | Junction Read Count | Reading Frame (one of 0+,0-,1+,1-,2+,2-; we translate novel junctions in all six reading frames)

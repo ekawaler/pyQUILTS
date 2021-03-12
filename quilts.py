@@ -1024,7 +1024,7 @@ def format_juncN_header(orig_header):
 	chr = orig_header.split('chr')[1].split('-')[0]
 	reads = orig_header.split('-')[1]
 	frame = orig_header.rstrip().split(')-')[-1]
-	return ">NovelJunc-chr%s-%s-%s|chr=%s|type=novel|site1=%s|site2=%s|reads=%s|frame=%s\n"% (chr,start,end,chr,start,end,reads,frame)
+	return ">NovelJunc-chr%s-%s-%s-%s|chr=%s|type=novel|site1=%s|site2=%s|reads=%s|frame=%s\n"% (chr,start,end,frame,chr,start,end,reads,frame)
 
 def format_header(orig_header,seq_type,abbr,desc):
 	if seq_type=='aa':
