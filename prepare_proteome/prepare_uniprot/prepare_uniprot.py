@@ -1,6 +1,4 @@
 import argparse
-import shutil
-import sys
 import os
 
 parser = argparse.ArgumentParser(description="Prepare Proteome Reference")
@@ -15,6 +13,10 @@ args = parser.parse_args()
 # Make proteome.fasta (this is just the proteome fasta file)
 if args.version == 'both':
 	os.system('cp %s proteome.fasta' % args.input_fasta)
+	kept = []
+	for line in open("proteome.fasta"):
+		if line.startswith('>'):
+			kept.append(line.split('|')[1])
 else:
 	kept = []
 	if args.version == 'swiss':
@@ -38,14 +40,11 @@ else:
 				line = f.readline()
 	w.close()
 	f.close()
-	os.system('mv %s uniprot_proteome.fasta' % args.input_fasta)
 	os.system('mv tmp_proteome.fasta proteome.fasta')
 
+kept = set(kept) # for speeding up the lookups below
 # Make transcriptome.bed and proteome.bed (transcriptome.bed is the uniprot bed file with all the swissprot/trembl entries removed depending on which version you're using, proteome.bed is that but untranslated sections are removed)
-if args.version == 'both':
-	pass
-	#os.system('cp %s transcriptome.bed' % args.bed_file) # copying in case they want to run it again and wonder where their uniprot bed file went
-else:
+if True: # only so that the diff for pull request is easier
 	w = open('transcriptome.bed','w')
 	p = open('proteome.bed','w')
 	f = open(args.bed_file, 'r')
@@ -63,10 +62,10 @@ else:
 			tend = int(spline[2])
 			lens = []
 			starts = []
-			ex_lens = map(int, spline[10].split(','))
-			ex_starts = map(int, spline[11].split(','))
+			ex_lens = list(map(int, spline[10].split(',')))
+			ex_starts = list(map(int, spline[11].split(',')))
 			pflag = False
-			for i in xrange(len(ex_lens)):
+			for i in range(len(ex_lens)):
 				if not pflag:
 					# check if it's a start and then set pflag
 					if pstart <= tstart+ex_starts[i]+ex_lens[i]:
