@@ -11,25 +11,21 @@ parser.add_argument('--version', type=str, default="swiss", help="Version of Uni
 args = parser.parse_args()
 
 # Make proteome.fasta (this is just the proteome fasta file)
-if args.version == 'both':
-	os.system('cp %s proteome.fasta' % args.input_fasta)
-	kept = []
-	for line in open("proteome.fasta"):
-		if line.startswith('>'):
-			kept.append(line.split('|')[1])
-else:
+if True: # for the diff
 	kept = []
 	if args.version == 'swiss':
 		starter = '>sp'
-	else:
+	elif args.version == 'trembl':
 		starter = '>tr'
+	else:
+		starter = '>'
 	w = open('tmp_proteome.fasta','w')
 	f = open(args.input_fasta,'r')
 	line = f.readline()
 	while line:
-		if line.split('|')[0] == starter:
-			kept.append(line.split('|')[1])
-			w.write(line)
+		if line.startswith(starter):
+			kept.append(line.split('|')[1].replace('-','@'))
+			w.write(">"+kept[-1]+"\n") # updating name so that ref_prot is properly populated for process_gene logic
 			line = f.readline()
 			while line and line[0] != '>':
 				w.write(line)
@@ -49,7 +45,7 @@ if True: # only so that the diff for pull request is easier
 	p = open('proteome.bed','w')
 	f = open(args.bed_file, 'r')
 	for line in f.readlines():
-		if line.split()[3].split('-')[0] in kept: # Keeping only SwissProt/TrEMBL
+		if line.split()[3].replace('-','@') in kept: # Keeping only SwissProt/TrEMBL
 			# Basic stuff for transcriptome file
 			spline = line.split()
 			spline[3] = spline[3].replace('-','@')
