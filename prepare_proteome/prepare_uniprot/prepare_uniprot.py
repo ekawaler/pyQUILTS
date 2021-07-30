@@ -1,6 +1,4 @@
 import argparse
-import shutil
-import sys
 import os
 
 parser = argparse.ArgumentParser(description="Prepare Proteome Reference")
@@ -13,21 +11,21 @@ parser.add_argument('--version', type=str, default="swiss", help="Version of Uni
 args = parser.parse_args()
 
 # Make proteome.fasta (this is just the proteome fasta file)
-if args.version == 'both':
-	os.system('cp %s proteome.fasta' % args.input_fasta)
-else:
+if True: # for the diff
 	kept = []
 	if args.version == 'swiss':
 		starter = '>sp'
-	else:
+	elif args.version == 'trembl':
 		starter = '>tr'
+	else:
+		starter = '>'
 	w = open('tmp_proteome.fasta','w')
 	f = open(args.input_fasta,'r')
 	line = f.readline()
 	while line:
-		if line.split('|')[0] == starter:
-			kept.append(line.split('|')[1])
-			w.write(line)
+		if line.startswith(starter):
+			kept.append(line.split('|')[1].replace('-','@'))
+			w.write(">"+kept[-1]+"\n") # updating name so that ref_prot is properly populated for process_gene logic
 			line = f.readline()
 			while line and line[0] != '>':
 				w.write(line)
@@ -38,19 +36,16 @@ else:
 				line = f.readline()
 	w.close()
 	f.close()
-	os.system('mv %s uniprot_proteome.fasta' % args.input_fasta)
 	os.system('mv tmp_proteome.fasta proteome.fasta')
 
+kept = set(kept) # for speeding up the lookups below
 # Make transcriptome.bed and proteome.bed (transcriptome.bed is the uniprot bed file with all the swissprot/trembl entries removed depending on which version you're using, proteome.bed is that but untranslated sections are removed)
-if args.version == 'both':
-	pass
-	#os.system('cp %s transcriptome.bed' % args.bed_file) # copying in case they want to run it again and wonder where their uniprot bed file went
-else:
+if True: # only so that the diff for pull request is easier
 	w = open('transcriptome.bed','w')
 	p = open('proteome.bed','w')
 	f = open(args.bed_file, 'r')
 	for line in f.readlines():
-		if line.split()[3].split('-')[0] in kept: # Keeping only SwissProt/TrEMBL
+		if line.split()[3].replace('-','@') in kept: # Keeping only SwissProt/TrEMBL
 			# Basic stuff for transcriptome file
 			spline = line.split()
 			spline[3] = spline[3].replace('-','@')
@@ -63,10 +58,10 @@ else:
 			tend = int(spline[2])
 			lens = []
 			starts = []
-			ex_lens = map(int, spline[10].split(','))
-			ex_starts = map(int, spline[11].split(','))
+			ex_lens = list(map(int, spline[10].split(',')))
+			ex_starts = list(map(int, spline[11].split(',')))
 			pflag = False
-			for i in xrange(len(ex_lens)):
+			for i in range(len(ex_lens)):
 				if not pflag:
 					# check if it's a start and then set pflag
 					if pstart <= tstart+ex_starts[i]+ex_lens[i]:
