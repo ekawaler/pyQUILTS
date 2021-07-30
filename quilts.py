@@ -1089,7 +1089,7 @@ def translate_saavs(log_dir, bed_file, logfile, ref_prot, seq_type='aa'):
 				subst = AA_subst[-1]
 				sequence = ref_prot[gene]
 				new_sequence = (sequence[:pos-1]+subst+sequence[pos:]).split('*')[0]
-				out_fasta.write(format_header(line, seq_type, abbr[gene], desc[gene]))
+				out_fasta.write(format_header(line, seq_type, abbr[gene.split('@')[0]], desc[gene.split('@')[0]]))
 				if AA_subst[0] == '*': # Write it out but don't change lines yet - we'll put some extra stuff on the end
 					out_fasta.write(new_sequence)
 					stop_replaced_flag = line.split()[1][-1] # pos or neg strand
