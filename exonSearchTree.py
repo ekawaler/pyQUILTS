@@ -23,7 +23,6 @@ class ExonSearchTree:
 	
 	def print_tree(self):
 		'''Used this instead of __str__ for formatting reasons, I guess.''' 
-		# Will currently print an exon several times if it spans many blocks. I don't care much about this function so am ignoring it for now but someday I'll fix it.
 		for node in self.chr_nodes:
 			self.chr_nodes[node].print_node()
 	
@@ -55,8 +54,8 @@ class ESTChrNode:
 		self.total_exons = 0
 	
 	def add_node(self, start, end, name, pos_in_gene):
-		start_chunk = start/self.chunk_size
-		end_chunk = end/self.chunk_size
+		start_chunk = start//self.chunk_size
+		end_chunk = end//self.chunk_size
 		for chunk in range(start_chunk, end_chunk+1):
 			try:
 				self.chunk_nodes[chunk].add_node(start, end, name, pos_in_gene)
@@ -66,7 +65,7 @@ class ESTChrNode:
 		self.total_exons += 1
 	
 	def find_exon(self, pos):
-		chunk = pos/self.chunk_size
+		chunk = pos//self.chunk_size
 		try:
 			exon = self.chunk_nodes[chunk].find_exon(pos)
 		except KeyError:
@@ -112,7 +111,7 @@ class ESTExonLeaf:
 		self.id = "%d#%s" % (start, name)
 	
 	def print_exon(self):
-		print self.chr, self.start, self.end, self.name, self.pos_in_gene
+		print(self.chr, self.start, self.end, self.name, self.pos_in_gene)
 		
 if __name__=="__main__":
 	# This section only gets run if you call exonSearchTree.py directly from the command line.
@@ -122,10 +121,8 @@ if __name__=="__main__":
 	est.add_exon(1, 99999900, 100000500, 1499, "NP_7")
 	est.add_exon('M', 999990, 1000500, 280, "NP_6")
 	est.add_exon('Q', 3939, 8858, 0)
-	est.add_exon('Q', 3939, 8858, 130, "NP_8")
 	est.print_tree()
-	print est.find_exon('M', 999995)
-	print est.find_exon('1', 100000001)
-	print est.find_exon('1', 99999901)
-	print est.find_exon('2', 949034)
-	print est.find_exon('Q', 4500)
+	print(est.find_exon('M', 999995))
+	print(est.find_exon('1', 100000001))
+	print(est.find_exon('1', 99999901))
+	print(est.find_exon('2', 949034))

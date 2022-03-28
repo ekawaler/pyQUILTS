@@ -6,7 +6,7 @@ from datetime import datetime
 from subprocess import call, check_call, CalledProcessError
 import warnings
 from exonSearchTree import ExonSearchTree
-from string import maketrans
+#from string import maketrans
 import re
 #from sets import Set
 from itertools import product
@@ -511,8 +511,10 @@ def get_variants(vcf_file, proteome_file, type, conn):
         # We have genotype info
         genotypes = True
         samples_to_database(header[9:], conn)
+        samp_list = header[9:]
     else:
         samples_to_database(["Sample"], conn)
+        samp_list = ["Sample"]
 
     line = f.readline()
     all_genes = {}
@@ -559,7 +561,7 @@ def get_variants(vcf_file, proteome_file, type, conn):
     f.close()
 
     # Write variants out to file.
-    # Need to let it write genes with no variants, also. [Why, though?]
+    # Need to let it write genes with no variants, also.
     w = open(proteome_file+".var", 'w')    
     for key in all_names:
         in_chr = []
@@ -577,6 +579,8 @@ def get_variants(vcf_file, proteome_file, type, conn):
             gtypes.append(var[3])
         w.write("%s\t%s\t%s\t%s\t%s\n" % (key, ','.join(in_chr), ','.join(in_gene), ','.join(ids), ','.join(gtypes)))
     w.close()
+
+    return samp_list
 
 def valid_nucleotides(strg, search=re.compile(r'[^ACGTU\.\-.]').search):
     '''Thanks, Stack Overflow user! Use this to make sure the variant we're given contains
@@ -602,7 +606,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
         return changes
 
     # Ready the translation table for the reverse strand.
-    translate_table = maketrans("ACGTacgt","TGCAtgca")
+    translate_table = str.maketrans("ACGTacgt","TGCAtgca")
     
     # For each variant in our variants, check if it will become an AA substitution.
     # Do I check only a single reading frame? That's what they did. 
@@ -647,7 +651,7 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
             '''
             continue
         
-        triplet_start = ((pos/3)*3) # start of the triplet containing pos. counting from 0, not 1
+        triplet_start = ((pos//3)*3) # start of the triplet containing pos. counting from 0, not 1
         triplet_orig = full_seq[triplet_start:(triplet_start+3)].upper()
         triplet_subst = new_nt
         if triplet_orig == '':
@@ -678,10 +682,10 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
         # Now we're just checking whether the old and new AAs are different. Leaving stop codon things in...
         if AA_old != AA_new:
             if reverse_flag:
-                total_AA = len(full_seq)/3
-                position = total_AA-(pos/3)
+                total_AA = len(full_seq)//3
+                position = total_AA-(pos//3)
             else:
-                position = pos/3+1
+                position = pos//3+1
             
             try:
                 orig_seq = ref_prot[header_line.split('\t')[3]].sequence
@@ -732,7 +736,7 @@ def translate_seq(sequence, strand, return_all = False):
     global codon_map
     
     if strand == '-':
-        translate_table = maketrans("ACGTacgt","TGCAtgca")
+        translate_table = str.maketrans("ACGTacgt","TGCAtgca")
         sequence = sequence[::-1].translate(translate_table)
     
     translated = ''
@@ -748,14 +752,14 @@ def translate_seq(sequence, strand, return_all = False):
     else:
         return translated.split('*')[0]
 
-def write_out_peff(variants,ref_prot):
+def write_out_peff(variants,ref_prot,samp_pos,sampname):
 
     # Set up the PEFF
-    output_peff = open(results_folder+"/peff/variant_proteome.peff",'w')
+    output_peff = open(results_folder+"/peff/%s_variant_proteome.peff" % sampname,'w')
 
     output_peff.write("# PEFF 1.0\n")
     output_peff.write("# DbName=ENSEMBL38.100\n")
-    output_peff.write("# Prefix=db\n")    
+    output_peff.write("# Prefix=%s\n" % sampname)    
     output_peff.write("# DbDescription=ENSEMBL38.100\n")
     #output_peff.write('# CustomKeyDef=(KeyName=SNP|Description="Single nucleotide polymorphism information"| RegExp="((chr)?[A-Za-z]?[0-9]{0,2})\| ([0-9]+)\|[ACGTUNX]*\|[ACGTUNX]*)"|FieldNames=Chromosome,StartPosition,NewNTSequence,OriginalNTSequence|FieldTypes=string,integer,string,string)\n')
     output_peff.write('# CustomKeyDef=(KeyName=PKProtein|Description="Primary key for the protein in the index database"|RegExp="[0-9]+"|FieldNames=PrimaryKey|FieldTypes=integer)\n')
@@ -774,15 +778,18 @@ def write_out_peff(variants,ref_prot):
         output_peff.write('>db:%s \\PName=%s \\GName=%s \\NcbiTaxId=%d \\TaxName=%s \\Length=%d \\PKProtein=%d' % (prot,protein.prot_name, protein.gene_name, protein.tax_id, protein.tax_name, protein.seq_length, protein.primary_key))
         if prot in variants.keys():
             varsimp_string = ' \VariantSimple='
-            snp_string = ' \SNP='
+            #snp_string = ' \SNP='
             vars = variants[prot]
             for v in vars:
-                if v.varsimple_output() not in vars_written:
-                    varsimp_string+=v.varsimple_output()
-                    snp_string+=v.snp_output()
-                    vars_written.append(v.varsimple_output())
+                has_gt = [int(x) for x in v.genotypes[samp_pos] if x.isdigit() and x!="0"]
+                if has_gt != []:
+                    if v.varsimple_output() not in vars_written:
+                        varsimp_string+=v.varsimple_output()
+                        #snp_string+=v.snp_output()
+                        vars_written.append(v.varsimple_output())
             #output_peff.write('%s%s' % (varsimp_string, snp_string))
-            output_peff.write('%s' % (varsimp_string)) # SNP string is in the index DB now
+            if varsimp_string != " \VariantSimple=":
+                output_peff.write('%s' % (varsimp_string)) # SNP string is in the index DB now
 
         output_peff.write('\n%s\n' % protein.sequence)
     
@@ -808,8 +815,9 @@ def fill_index_db(variants, ref_prot, conn):
                 c.execute('INSERT INTO variants VALUES (?,?,?,?,?,?,?,?,?,?)', 
                 (var_pk,protein.primary_key,var.aa_pos,var.ref_aa,var.alt_aa,var.chr,var.chr_pos,var.ref_nt,var.alt_nt,var.snpid))
                 for v in range(len(var.genotypes)):
-                    c.execute('INSERT INTO samples_to_variants VALUES (?,?,?,?)', (s_to_v_pk, v+1,var_pk,var.genotypes[v]))
-                    s_to_v_pk += 1
+                    if [int(x) for x in var.genotypes[v] if x.isdigit() and x!="0"] != []:
+                        c.execute('INSERT INTO samples_to_variants VALUES (?,?,?,?)', (s_to_v_pk, v+1,var_pk,var.genotypes[v]))
+                        s_to_v_pk += 1
                 var_pk += 1
 
     conn.commit()
@@ -1018,7 +1026,7 @@ if __name__ == "__main__":
     # Next, create a proteome.bed file containing only variants...probably.
     # I could probably combine them more prettily, but for now I'll just concatenate the files.
     # Now includes the name of the variant, if it has one
-    get_variants(args.somatic.rsplit('/',1)[0]+"/filtered.vcf", results_folder+"/log/proteome.bed", "S", conn)
+    samp_list = get_variants(args.somatic.rsplit('/',1)[0]+"/filtered.vcf", results_folder+"/log/proteome.bed", "S", conn)
     write_to_status("Get variants completed, proteome.bed file written")    
 
     # Combine (some more) and sort variants.
@@ -1035,7 +1043,8 @@ if __name__ == "__main__":
     #shutil.copy(results_folder+"/log/proteome.indel.var.bed.dna.fasta", results_folder+"/fasta/parts/proteome.indel.fasta")
 
     # Write out the PEFF file
-    write_out_peff(final_vars, ref_prot)
+    for i in range(len(samp_list)):
+        write_out_peff(final_vars, ref_prot, i, samp_list[i])
 
     # Write out the index database
     fill_index_db(final_vars, ref_prot, conn)
