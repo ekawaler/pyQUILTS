@@ -1,5 +1,6 @@
 import argparse
 import os
+from pickle import FALSE
 import sys
 import shutil
 from datetime import datetime
@@ -10,6 +11,7 @@ from exonSearchTree import ExonSearchTree
 import re
 #from sets import Set
 from itertools import product
+import subprocess
 import sqlite3
 
 # Sorry about the global variables!
@@ -114,6 +116,8 @@ def parse_input_arguments():
         raise SystemExit("ERROR: Must have a somatic variant file.\nAborting program.")
 
     if args.somatic.rsplit('/',1)[-1] == 'filtered.vcf':
+        raise SystemExit("ERROR: 'filtered.vcf' is a protected name. Please rename your VCF and try again. \nAborting program.")
+    if os.path.exists(args.somatic+"/filtered.vcf") or (args.germline and os.path.exists(args.germline+"/filtered.vcf")):
         raise SystemExit("ERROR: 'filtered.vcf' is a protected name. Please rename your VCF and try again. \nAborting program.")
 
     if args.dbname[-3:] != '.db':
@@ -256,12 +260,12 @@ def set_up_db(dbloc):
              (PKSamples integer primary key, 
              SampleName text)''')
     c.execute('''CREATE TABLE samples_to_variants
-             (PKSampToVar integer primary key,
-             FKSamples integer, 
+             (FKSamples integer, 
              FKVariants integer,
              Zygosity text,
              foreign key (FKSamples) references samples(PKSamples),
-             foreign key (FKVariants) references variants(PKVariants))''')
+             foreign key (FKVariants) references variants(PKVariants),
+             primary key (FKSamples, FKVariants))''')
     conn.commit()
     return conn
 
@@ -505,10 +509,12 @@ def get_variants(vcf_file, proteome_file, type, conn):
     f = open(vcf_file, 'r')
     
     line = f.readline()
+    while line[:2]=="##":
+        line = f.readline()
     genotypes = False
     header = line.rstrip().split('\t')
     if len(header) > 8:
-        # We have genotype info
+        # We have genotype info. This should now always be the case
         genotypes = True
         samples_to_database(header[9:], conn)
         samp_list = header[9:]
@@ -519,6 +525,8 @@ def get_variants(vcf_file, proteome_file, type, conn):
     line = f.readline()
     all_genes = {}
     while line:
+        if line[0] == "#":
+            continue
         spline = line.rstrip().split('\t')
         try:
             chr, pos, id, old, new, qual = spline[0].lstrip('chr'), int(spline[1]), spline[2], spline[3], spline[4], spline[5]
@@ -753,7 +761,7 @@ def translate_seq(sequence, strand, return_all = False):
         return translated.split('*')[0]
 
 def write_out_peff(variants,ref_prot,samp_pos,sampname):
-
+    # Will have to redo this to be more efficient with the new VCF processing, but should still work?
     # Set up the PEFF
     output_peff = open(results_folder+"/peff/%s_variant_proteome.peff" % sampname,'w')
 
@@ -795,12 +803,50 @@ def write_out_peff(variants,ref_prot,samp_pos,sampname):
     
     output_peff.close()
 
+def write_combined_peff(variants,ref_prot):
+    # Will have to redo this to be more efficient with the new VCF processing, but should still work?
+    # Set up the PEFF
+    output_peff = open(results_folder+"/peff/combined_variant_proteome.peff",'w')
+
+    output_peff.write("# PEFF 1.0\n")
+    output_peff.write("# DbName=ENSEMBL38.100\n")
+    output_peff.write("# Prefix=combined\n")
+    output_peff.write("# DbDescription=ENSEMBL38.100\n")
+    #output_peff.write('# CustomKeyDef=(KeyName=SNP|Description="Single nucleotide polymorphism information"| RegExp="((chr)?[A-Za-z]?[0-9]{0,2})\| ([0-9]+)\|[ACGTUNX]*\|[ACGTUNX]*)"|FieldNames=Chromosome,StartPosition,NewNTSequence,OriginalNTSequence|FieldTypes=string,integer,string,string)\n')
+    output_peff.write('# CustomKeyDef=(KeyName=PKProtein|Description="Primary key for the protein in the index database"|RegExp="[0-9]+"|FieldNames=PrimaryKey|FieldTypes=integer)\n')
+    output_peff.write("# DbVersion=38.100\n")
+    output_peff.write("# DbSource=ENSEMBL, CPTAC\n")
+    output_peff.write("# NumberOfEntries=%d\n" % len(ref_prot.keys()))
+    output_peff.write("# SequenceType=AA\n")
+    output_peff.write("# //\n")
+
+    for prot in ref_prot.keys():
+        protein = ref_prot[prot]
+        varsimp_string = ''
+        snp_string = ''
+        vars_written = []
+
+        output_peff.write('>db:%s \\PName=%s \\GName=%s \\NcbiTaxId=%d \\TaxName=%s \\Length=%d \\PKProtein=%d' % (prot,protein.prot_name, protein.gene_name, protein.tax_id, protein.tax_name, protein.seq_length, protein.primary_key))
+        if prot in variants.keys():
+            varsimp_string = ' \VariantSimple='
+            vars = variants[prot]
+            for v in vars:
+                if v.varsimple_output() not in vars_written:
+                    varsimp_string+=v.varsimple_output()
+                    vars_written.append(v.varsimple_output())
+            if varsimp_string != " \VariantSimple=":
+                output_peff.write('%s' % (varsimp_string)) # SNP string is in the index DB now
+
+        output_peff.write('\n%s\n' % protein.sequence)
+
+    output_peff.close()
+
 def fill_index_db(variants, ref_prot, conn):
 
     c = conn.cursor()
 
     var_pk = 1
-    s_to_v_pk = 1
+    #s_to_v_pk = 1
 
     # For each protein...
 
@@ -816,8 +862,9 @@ def fill_index_db(variants, ref_prot, conn):
                 (var_pk,protein.primary_key,var.aa_pos,var.ref_aa,var.alt_aa,var.chr,var.chr_pos,var.ref_nt,var.alt_nt,var.snpid))
                 for v in range(len(var.genotypes)):
                     if [int(x) for x in var.genotypes[v] if x.isdigit() and x!="0"] != []:
-                        c.execute('INSERT INTO samples_to_variants VALUES (?,?,?,?)', (s_to_v_pk, v+1,var_pk,var.genotypes[v]))
-                        s_to_v_pk += 1
+                        #c.execute('INSERT INTO samples_to_variants VALUES (?,?,?,?)', (s_to_v_pk, v+1,var_pk,var.genotypes[v]))
+                        #s_to_v_pk += 1
+                        c.execute('INSERT INTO samples_to_variants VALUES (?,?,?)', (v+1,var_pk,var.genotypes[v]))
                 var_pk += 1
 
     conn.commit()
@@ -998,6 +1045,19 @@ if __name__ == "__main__":
 
     # Time to merge and quality-threshold the variant files!
     if args.somatic:
+        try:
+            subprocess.check_call("%s/vcfhandler.sh %s %s" % (script_dir,args.somatic,args.variant_quality_threshold),shell=True)
+        except subprocess.CalledProcessError:
+            args.somatic = None
+
+    if args.germline:
+        try:
+            subprocess.check_call("%s/vcfhandler.sh %s %s" % (script_dir, args.germline,args.variant_quality_threshold),shell=True)
+        except subprocess.CalledProcessError:
+            args.germline = None
+
+    '''
+    if args.somatic:
         som_flag = qual_filter(args.somatic, args.variant_quality_threshold)
         if som_flag:
             args.somatic = None
@@ -1005,6 +1065,7 @@ if __name__ == "__main__":
         germ_flag = qual_filter(args.germline, args.variant_quality_threshold)
         if germ_flag:
             args.germline = None
+    '''
     quit_if_no_variant_files(args) # Check to make sure we have our somatic variant file
     write_to_status("Merge and qual filter finished")
         
@@ -1042,9 +1103,11 @@ if __name__ == "__main__":
     #shutil.copy(results_folder+"/log/proteome.aa.var.bed.dna.fasta", results_folder+"/fasta/variant_proteome.fasta")
     #shutil.copy(results_folder+"/log/proteome.indel.var.bed.dna.fasta", results_folder+"/fasta/parts/proteome.indel.fasta")
 
-    # Write out the PEFF file
+    # Write out the PEFF files, for individual samples and combined
     for i in range(len(samp_list)):
         write_out_peff(final_vars, ref_prot, i, samp_list[i])
+    if len(samp_list) > 1:
+        write_combined_peff(final_vars,ref_prot)
 
     # Write out the index database
     fill_index_db(final_vars, ref_prot, conn)
