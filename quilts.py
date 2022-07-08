@@ -36,6 +36,7 @@ class Variant:
         self.chr_pos = int(re.findall(r'\d+', genvar.split(':')[0].split('-')[1])[0])
         self.ref_nt = genvar.split(':')[0].split('-')[1].split(str(self.chr_pos))[0]
         self.alt_nt = genvar.split(':')[0].split('-')[1].split(str(self.chr_pos))[1]
+        #self.chr_pos = self.chr_pos-1
         self.qual = genvar.split(':')[1]
         self.prot_pos = int(re.findall(r'\d+', inprotvar.split(':')[0].split('-')[1])[0])
         self.prot_accession = prot_acc
@@ -55,7 +56,7 @@ class Variant:
         return vsstring
     
     def snp_output(self):
-        #snpstring = "(chr%s|%d|%d|%s|%s|Novel)" % (self.chr, self.chr_pos+1, self.chr_pos+1,self.alt_nt,self.ref_nt)
+        #snpstring = "(chr%s|%d|%d|%s|%s|Unannotated)" % (self.chr, self.chr_pos+1, self.chr_pos+1,self.alt_nt,self.ref_nt)
         snpstring = "(chr%s|%d|%d|%s|%s|%s)" % (self.chr, self.chr_pos+1, self.chr_pos+1,self.alt_nt,self.ref_nt,self.snpid)
         return snpstring
     
@@ -266,6 +267,12 @@ def set_up_db(dbloc):
              foreign key (FKSamples) references samples(PKSamples),
              foreign key (FKVariants) references variants(PKVariants),
              primary key (FKSamples, FKVariants))''')
+    c.execute('''CREATE TABLE metadata
+             (QuiltsVer text,
+             GenomeBuild text,
+             ProteomeBuild text)''')
+    c.execute('INSERT INTO metadata VALUES (?,?,?)',
+        ("0.0","GRCh38","Ensembl_human_38.100"))
     conn.commit()
     return conn
 
@@ -544,7 +551,7 @@ def get_variants(vcf_file, proteome_file, type, conn):
         if new == '.' or new == '-':
             new = ''
         if id == '.' or id == '':
-            id = "Novel"
+            id = "Unannotated"
         if genotypes:
             gtypes = ''
             for samp_no in range(9,len(header)):
@@ -639,7 +646,9 @@ def process_gene(header_line, second_header, exon_headers, exon_seqs, variants, 
         # Remove the ones with multiple nt in the variant
         # I'm going to remove the ones where both sides have the same number but that number is greater than 1
         # Just for now.
-        pos = var.prot_pos # using the -1 so we're counting from 0, not 1
+        pos = var.prot_pos-1
+        #pos = var.prot_pos # using the -1 so we're counting from 0, not 1
+        #pos = var.prot_pos+1
         orig_nt = var.ref_nt
         new_nt = var.alt_nt
         
