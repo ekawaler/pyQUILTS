@@ -1,12 +1,12 @@
 import argparse
 import os
 from pickle import FALSE
-import sys
+#import sys
 import shutil
 from datetime import datetime
-from subprocess import call, check_call, CalledProcessError
+from subprocess import call, check_call, CalledProcessError, run
 import warnings
-from exonSearchTree import ExonSearchTree
+import glob
 #from string import maketrans
 import re
 #from sets import Set
@@ -98,6 +98,107 @@ class Protein:
     def process_uniprot_header(self,header):
         pass
 
+class ExonSearchTree:
+	'''The root of the tree, so to speak. Everything gets called through this class and propagates "down".'''
+	def __init__(self, chunk_size = 1000000):
+		self.chr_nodes = {}
+		self.chunk_size = chunk_size
+		self.total_exons = 0
+	
+	def print_tree(self):
+		'''Used this instead of __str__ for formatting reasons, I guess.''' 
+		for node in self.chr_nodes:
+			self.chr_nodes[node].print_node()
+	
+	def add_exon(self, chr, start, end, pos_in_gene, name = "."):
+		'''Adds an exon to the tree. Call the one from this class, it'll call the rest appropriately.'''
+		chr = str(chr)
+		try:
+			self.chr_nodes[chr].add_node(start, end, name, pos_in_gene)
+		except KeyError:
+			self.chr_nodes[chr] = ESTChrNode(chr, self.chunk_size)
+			self.chr_nodes[chr].add_node(start, end, name, pos_in_gene)
+		self.total_exons += 1
+			
+	def find_exon(self, chr, pos):
+		'''Finds all exons containing a query variant.'''
+		chr = str(chr)
+		try:
+			exon = self.chr_nodes[chr].find_exon(pos)
+		except KeyError:
+			exon = []
+		return exon
+
+### Moving the exon search tree data structure to this file
+
+class ESTChrNode:
+	# A layer of chromosome nodes
+	def __init__(self, chr_num, chunk_size):
+		self.chr_num = chr_num
+		self.chunk_nodes = {}
+		self.chunk_size = chunk_size
+		self.total_exons = 0
+	
+	def add_node(self, start, end, name, pos_in_gene):
+		start_chunk = start//self.chunk_size
+		end_chunk = end//self.chunk_size
+		for chunk in range(start_chunk, end_chunk+1):
+			try:
+				self.chunk_nodes[chunk].add_node(start, end, name, pos_in_gene)
+			except KeyError:
+				self.chunk_nodes[chunk] = ESTChunkNode(self.chr_num, chunk)
+				self.chunk_nodes[chunk].add_node(start, end, name, pos_in_gene)
+		self.total_exons += 1
+	
+	def find_exon(self, pos):
+		chunk = pos//self.chunk_size
+		try:
+			exon = self.chunk_nodes[chunk].find_exon(pos)
+		except KeyError:
+			exon = []
+		return exon
+
+	def print_node(self):
+		for node in self.chunk_nodes:
+			self.chunk_nodes[node].print_node()
+
+class ESTExonLeaf:
+	# The leaf node that contains the exon.
+	def __init__(self, chr, start, end, name, pos_in_gene):
+		self.chr = chr
+		self.start = start
+		self.end = end
+		self.name = name
+		self.pos_in_gene = pos_in_gene
+		self.id = "%d#%s" % (start, name)
+	
+	def print_exon(self):
+		print(self.chr, self.start, self.end, self.name, self.pos_in_gene)
+
+class ESTChunkNode:
+	# A layer of chunk nodes (for now, every million BP gets its own chunk node)
+	def __init__(self, chr, number):
+		self.chr = chr
+		self.chunk_num = number
+		self.exons = {}
+	
+	def add_node(self, start, end, name, pos_in_gene):
+		ident = "%d#%s", (start, name)
+		self.exons[ident] = ESTExonLeaf(self.chr, start, end, name, pos_in_gene)
+	
+	def find_exon(self, pos):
+		nms = []
+		for ex in self.exons:
+			if pos >= self.exons[ex].start:
+				exon = self.exons[ex]
+				if pos <= exon.end:
+					nms.append([exon.name, exon.pos_in_gene+(pos-exon.start)])
+		return nms
+
+	def print_node(self):
+		for node in self.exons:
+			self.exons[node].print_exon()
+
 def parse_input_arguments():
     ''' Sets up an argument parser and checks a couple of the inputs for correctness.'''
     parser = argparse.ArgumentParser(description="QUILTS") # It's QUILTS!
@@ -105,8 +206,7 @@ def parse_input_arguments():
     parser.add_argument('--reference_proteome', choices=['ensembl','refseq','uniprot'], default="ensembl", help="Reference proteome source (defaults to ensembl). Accepts ensembl, refseq, or uniprot")
     parser.add_argument('--proteome', type=str, default=".", help="full path to folder containing reference proteome (defaults to .)")
     parser.add_argument('--genome', type=str, default=".", help="full path to folder containing reference genome (defaults to .)")
-    parser.add_argument('--somatic', type=str, help="full path to somatic variant VCF file")
-    parser.add_argument('--germline', type=str, help="full path to germline variant VCF file")
+    parser.add_argument('--somatic', type=str, help="full path to folder containing variant VCF files")
     parser.add_argument('--variant_quality_threshold', type=float, default=0.0, help="Quality threshold for variants (defaults to 0.0)")
     parser.add_argument('--dbname', type=str, default='index_database.db', help="Name of index database (defaults to index_database.db)")
     
@@ -118,7 +218,7 @@ def parse_input_arguments():
 
     if args.somatic.rsplit('/',1)[-1] == 'filtered.vcf':
         raise SystemExit("ERROR: 'filtered.vcf' is a protected name. Please rename your VCF and try again. \nAborting program.")
-    if os.path.exists(args.somatic+"/filtered.vcf") or (args.germline and os.path.exists(args.germline+"/filtered.vcf")):
+    if os.path.exists(args.somatic+"/filtered.vcf"):
         raise SystemExit("ERROR: 'filtered.vcf' is a protected name. Please rename your VCF and try again. \nAborting program.")
 
     if args.dbname[-3:] != '.db':
@@ -275,6 +375,94 @@ def set_up_db(dbloc):
         ("0.0","GRCh38","Ensembl_human_38.100"))
     conn.commit()
     return conn
+
+### Replacing vcfhandler.sh
+def vcfhandler(script_dir):
+    # bgzip everything that is not yet bgzipped
+    files = glob.glob("%s/*.vcf" % script_dir)
+    for f in files:
+        run("bgzip -c %s > %s.gz" % (f,f),shell=True)
+
+    files = glob.glob("%s/*.vcf.gz" % script_dir)
+    for f in files:
+        run("tabix -p vcf %s" % f,shell=True)
+        run("bcftools norm -m - %s -o tmp.vcf" % f,shell=True)
+        run('bcftools annotate --rename-chrs ./chrmap.txt tmp.vcf -o tmp2.vcf',shell=True)
+        run("bgzip -c tmp2.vcf > %s" % f,shell=True)
+        run("tabix -p vcf -f %s" % f,shell=True)
+        run("rm tmp.vcf",shell=True)
+        run("rm tmp2.vcf",shell=True)
+        samps = run("bcftools query -l %s | wc -l" % f,shell=True,capture_output=True,text=True)
+        if samps.stdout == "0\n": # add format/sample columns
+            sampname = f.split('/')[-1].rstrip(".vcf.gz")
+            run("bcftools view -h %s | grep '^##' > header.hdr" % f,shell=True)
+            run('echo "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">" >> header.hdr',shell=True)
+            run("echo $'#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t%s' >> header.hdr" % sampname,shell=True)
+            run("bcftools view -H %s | sed '/^#/!s/$/\tGT\t1\/\./' > tmp.vcf" % f,shell=True)
+            run("cat header.hdr tmp.vcf > tmp2.vcf",shell=True)
+            run("bgzip -c tmp2.vcf > %s" % f,shell=True)
+            run("tabix -p vcf -f %s" % f,shell=True)
+            run("rm tmp.vcf",shell=True)
+            run("rm tmp2.vcf",shell=True)
+        
+    if len(files) > 1:
+        run('bcftools merge -0 -m none -o %s/filtered.vcf %s' % (script_dir,' '.join(files)),shell=True)
+    else:
+        run("bcftools view %s > %s/filtered.vcf" % (f,script_dir),shell=True)
+
+
+### Replacing read_chr_bed.c
+def read_chr_bed(results_folder):
+    bedfil = "%s/log/proteome.bed" % results_folder
+    beddna = "%s.dna" % bedfil
+    f1 = open(bedfil,'r')
+    w1 = open(beddna,'w')
+    unopened = set()
+    line = f1.readline()
+    while line:
+        w1.write(line)
+        spline = line.split()
+        name,chr,start,end,strand,lengths,offsets,qual = spline[3],spline[0],int(spline[1]),int(spline[2]),spline[5],spline[10],spline[11],spline[4]
+        splengths = lengths.split(',')
+        spoffsets = offsets.split(',')
+        w1.write(">%s (MAP:%s:%d%s %s %s)\n" % (name,chr,start,strand,lengths,offsets))
+        padding=600
+        chrfile = "%s/%s.fa.cmp1" % (args.genome,chr)
+        if not os.path.exists(chrfile):
+            unopened.add(chr)
+            line = f1.readline()
+            continue
+        f2 = open(chrfile,'rb')
+
+        f2.seek(start-padding)
+        buf = f2.read(padding)
+        if buf:
+            w1.write("%s\t-1\t%s\t%d\t%d\t%s\t0\t%s\n" % (name,chr,start-padding,padding,strand,buf.decode()))
+
+        prevlen=0
+        prevofst=0
+        for p in range(len(splengths)):
+            ln = int(splengths[p])
+            ofst = int(spoffsets[p])
+            strt = ofst-prevlen-prevofst
+            f2.seek(strt,1)
+            buf = f2.read(ln)
+            prevlen=ln
+            prevofst=ofst
+            if (ln < 50000) and buf:
+                w1.write("%s\t%d\t%s\t%d\t%d\t%s\t%s\t%s\n" % (name,p,chr,start+ofst,ln,strand,qual,buf.decode()))
+            else:
+                w1.write("%s\t%d\t%s\t%d\t%d\t%s\t%s\tError Reading Sequence\n" % (name,p,chr,start+ofst,ln,strand,qual))
+
+        buf = f2.read(padding)
+        if buf:
+            w1.write("%s\t+1\t%s\t%d\t%d\t%s\t0\t%s\n" % (name,chr,end,padding,strand,buf.decode()))
+        
+        f2.close()
+        line = f1.readline()
+
+    print("Unable to find chromosomes %s" % unopened)
+
 
 ### These functions are for merging and quality checking the variant files.
 
@@ -1053,6 +1241,11 @@ if __name__ == "__main__":
     ref_prot = save_ref_prot(results_folder+"/fasta/reference_proteome.fasta",args.reference_proteome)
 
     # Time to merge and quality-threshold the variant files!
+
+    if args.somatic:
+        vcfhandler(args.somatic)
+
+    '''
     if args.somatic:
         try:
             subprocess.check_call("%s/vcfhandler.sh %s %s" % (script_dir,args.somatic,args.variant_quality_threshold),shell=True)
@@ -1065,7 +1258,7 @@ if __name__ == "__main__":
         except subprocess.CalledProcessError:
             args.germline = None
 
-    '''
+    
     if args.somatic:
         som_flag = qual_filter(args.somatic, args.variant_quality_threshold)
         if som_flag:
@@ -1078,25 +1271,29 @@ if __name__ == "__main__":
     quit_if_no_variant_files(args) # Check to make sure we have our somatic variant file
     write_to_status("Merge and qual filter finished")
         
+    '''
     # Now let's remove everything in the somatic file that is duplicated in the germline file
     # since if it shows up in both, it's probably actually a germline variant.
     if args.somatic and args.germline:
         remove_somatic_duplicates(args.germline.rsplit('/',1)[0], args.somatic.rsplit('/',1)[0])
     write_to_status("Probable germline variants filtered out of somatic variant file")
+    '''
 
     # Call read_chr_bed.c, which takes the reference genome and proteome.bed file as input and produces
     # a fasta file of exomes.
     # Possible but unlikely future work: rewrite the C file (still in C though) so it's more efficient?
     # I dunno, it seems fine for now.
-    try:
-        check_call("%s/read_chr_bed %s/log/proteome.bed %s" % (script_dir, results_folder, args.genome), shell=True)
-    except CalledProcessError:
-        raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file. Try recompiling read_chr_bed.c.\nAborting program.")
+    #try:
+    #    check_call("%s/read_chr_bed %s/log/proteome.bed %s" % (script_dir, results_folder, args.genome), shell=True)
+    #except CalledProcessError:
+    #    raise SystemExit("ERROR: read_chr_bed didn't work - now we don't have a proteome.bed.dna file. Try recompiling read_chr_bed.c.\nAborting program.")
     
+    read_chr_bed(results_folder)
+
     # Next, create a proteome.bed file containing only variants...probably.
     # I could probably combine them more prettily, but for now I'll just concatenate the files.
     # Now includes the name of the variant, if it has one
-    samp_list = get_variants(args.somatic.rsplit('/',1)[0]+"/filtered.vcf", results_folder+"/log/proteome.bed", "S", conn)
+    samp_list = get_variants(args.somatic+"/filtered.vcf", results_folder+"/log/proteome.bed", "S", conn)
     write_to_status("Get variants completed, proteome.bed file written")    
 
     # Combine (some more) and sort variants.
@@ -1126,3 +1323,4 @@ if __name__ == "__main__":
         
     # Combine all of the proteome parts into one.
     write_to_status("DONE")
+
